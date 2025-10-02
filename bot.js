@@ -72,8 +72,8 @@ let isFirstRun = true;
 async function login() {
   for (let attempt = 1; attempt < 4; ++attempt) {
     try {
-      const email = process.env.HONEYGAIN_EMAIL;
-      const password = process.env.HONEYGAIN_PASSWORD;
+      const email = process.env.EMAIL;
+      const password = process.env.PASSWORD;
 
       console.log(`✍️ Escribiendo credenciales (intento ${attempt})...`);
       await page.type("#email", email, { delay: 50 });
@@ -153,11 +153,11 @@ async function runCycle() {
       await page.waitForSelector('#email', { timeout: 15000 });
       await page.waitForSelector('#password', { timeout: 15000 });
 
-      const email = process.env.HONEYGAIN_EMAIL;
-      const password = process.env.HONEYGAIN_PASSWORD;
+      const email = process.env.EMAIL;
+      const password = process.env.PASSWORD;
 
       if (!email || !password) {
-        throw new Error("❌ Variables de entorno HONEYGAIN_EMAIL y HONEYGAIN_PASSWORD requeridas.");
+        throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
       }
 
       // Realizar login
