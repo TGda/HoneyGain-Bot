@@ -16,8 +16,8 @@ services:
     restart: unless-stopped
     environment:
       # Usar los nombres que espera tu bot.js
-      - HONEYGAIN_EMAIL=${EMAIL} # <-- Mapea la variable
-      - HONEYGAIN_PASSWORD=${PASSWORD} # <-- Mapea la variable
+      - EMAIL=${EMAIL} # <-- Mapea la variable
+      - PASSWORD=${PASSWORD} # <-- Mapea la variable
       - TZ=${TZ:-UTC} # <-- Opcional
     dns:
       - 1.1.1.1
