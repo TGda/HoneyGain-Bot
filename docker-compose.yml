@@ -1,22 +1,25 @@
-version: '3.8' # Usa una versión compatible con Portainer
+version: '3.8'
 
 services:
+  honeygain:
+    container_name: Honeygain
+    image: honeygain/honeygain
+    restart: always
+    command: -tou-accept -email ${EMAIL} -pass ${PASSWORD} -device "HoneyGain"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
   honeygain-bot:
-    build: . # Indica que la imagen se debe construir desde el Dockerfile en el directorio actual (.)
-    # Si planeas subir la imagen a GHCR y usarla directamente (como en tu ejemplo anterior),
-    # reemplaza 'build: .' por 'image: ghcr.io/tgda/honeygain-bot:latest' y omite el paso de construcción manual.
     container_name: Honeygain-bot
+    build: . # <-- Importante: construir desde el Dockerfile del repo
     restart: unless-stopped
     environment:
-      # Asegúrate de que los nombres de las variables coincidan con las que usa tu bot.js
-      - HONEYGAIN_EMAIL=${HONEYGAIN_EMAIL} # Usa una variable del entorno de Portainer o define un valor por defecto
-      - HONEYGAIN_PASSWORD=${HONEYGAIN_PASSWORD} # Usa una variable del entorno de Portainer o define un valor por defecto
-      # Opcional: Configurar la zona horaria del contenedor
-      - TZ=${TZ:-UTC} # Usa la variable TZ del entorno de Portainer, o 'UTC' por defecto
-    # Opcional: Montar un volumen para logs o configuraciones persistentes
-    # volumes:
-    #   - ./logs:/app/logs
-    # Opcional: Configurar DNS
-    # dns:
-    #   - 1.1.1.1
-    #   - 8.8.8.8
+      # Usar los nombres que espera tu bot.js
+      - HONEYGAIN_EMAIL=${EMAIL} # <-- Mapea la variable
+      - HONEYGAIN_PASSWORD=${PASSWORD} # <-- Mapea la variable
+      - TZ=${TZ:-UTC} # <-- Opcional
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    # depends_on no es estrictamente necesario aquí
