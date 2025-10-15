@@ -140,16 +140,26 @@ async function extractBalanceFromContainer(containerElement) {
         const fullText = await page.evaluate(element => element.textContent, containerElement);
         console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
 
-        // 2. Buscar un patrón numérico que coincida con formatos comunes de balance
-        //    Este regex busca: dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
-        //    Ej: 1,234.56, 1234.56, 1.234,56
-        //    Busca el último número que aparezca en el texto (por si hay más texto después)
-        const balanceRegex = /([\d.,]+\d)/g; // \d al final asegura que termina en número
-        const matches = fullText.match(balanceRegex);
-        if (matches) {
-            // Tomar el último match como el balance (por si hay múltiples números)
-            const potentialBalance = matches[matches.length - 1];
-            console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado: "${potentialBalance}"`);
+        // 2. Buscar la posición de "Current balance"
+        const balanceLabelIndex = fullText.toLowerCase().indexOf('current balance');
+        if (balanceLabelIndex === -1) {
+            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró la etiqueta 'Current balance' en el contenedor.`);
+            return null;
+        }
+
+        // 3. Extraer el texto que viene después de "Current balance"
+        const textAfterLabel = fullText.substring(balanceLabelIndex + 'current balance'.length).trim();
+        console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
+
+        // 4. Buscar un patrón numérico que coincida con formatos comunes de balance en ese fragmento
+        //    Busca dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
+        //    y que esté al principio del texto extraído (o después de espacios)
+        const balanceRegex = /^\s*([\d.,]+\d)/; // ^ indica inicio del string, \s* espacios iniciales
+        const match = textAfterLabel.match(balanceRegex);
+
+        if (match && match[1]) {
+            const potentialBalance = match[1];
+            console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado después de 'Current balance': "${potentialBalance}"`);
             // Validar que el match tenga sentido como balance (no es solo un número suelto)
             // Una simple validación: que tenga al menos un separador (, o .) o sea mayor a 999
             if (potentialBalance.includes(',') || potentialBalance.includes('.') || parseInt(potentialBalance.replace(/,/g, '').replace(/\./g, ''), 10) > 999) {
@@ -158,7 +168,7 @@ async function extractBalanceFromContainer(containerElement) {
                 console.log(`${getCurrentTimestamp()} ⚠️ El valor potencial "${potentialBalance}" no parece un balance válido.`);
             }
         } else {
-            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un patrón numérico de balance en el texto del contenedor.`);
+            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un patrón numérico de balance después de 'Current balance'.`);
         }
     } catch (e) {
         console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer balance del contenedor: ${e.message}`);
