@@ -138,7 +138,7 @@ async function extractBalanceFromContainer(containerElement) {
     try {
         // 1. Obtener todo el texto del contenedor
         const fullText = await page.evaluate(element => element.textContent, containerElement);
-        console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
+        //console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
 
         // 2. Buscar la posición de "Current balance"
         const balanceLabelIndex = fullText.toLowerCase().indexOf('current balance');
@@ -149,7 +149,7 @@ async function extractBalanceFromContainer(containerElement) {
 
         // 3. Extraer el texto que viene después de "Current balance"
         const textAfterLabel = fullText.substring(balanceLabelIndex + 'current balance'.length).trim();
-        console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
+        //console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
 
         // 4. Buscar un patrón numérico que coincida con formatos comunes de balance en ese fragmento
         //    Busca dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
@@ -159,7 +159,7 @@ async function extractBalanceFromContainer(containerElement) {
 
         if (match && match[1]) {
             const potentialBalance = match[1];
-            console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado después de 'Current balance': "${potentialBalance}"`);
+            //console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado después de 'Current balance': "${potentialBalance}"`);
             // Validar que el match tenga sentido como balance (no es solo un número suelto)
             // Una simple validación: que tenga al menos un separador (, o .) o sea mayor a 999
             if (potentialBalance.includes(',') || potentialBalance.includes('.') || parseInt(potentialBalance.replace(/,/g, '').replace(/\./g, ''), 10) > 999) {
@@ -288,7 +288,7 @@ async function runCycle() {
           if (extractedBalance) {
               balance = extractedBalance;
               balanceFound = true;
-              console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
+              //console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
           } else {
               console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor encontrado.`);
           }
