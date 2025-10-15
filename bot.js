@@ -188,25 +188,33 @@ async function runCycle() {
     // Esperar un poco más para que el contenido dinámico se cargue
     await page.waitForTimeout(5000);
     
-    // Usar un selector más general para encontrar el contenedor del balance
-    // Intentar encontrar el elemento que contiene "Current Balance" y el valor numérico
+    // Usar el nuevo selector del contenedor del balance que me proporcionaste
+    console.log("🔍 Intentando nuevo selector del balance (contenedor)...");
     let balance = "0";
     let balanceFound = false;
     
-    // Estrategia 1: Intentar con el nuevo selector del balance (el que me proporcionaste) - ACTUALIZADO A nth-child(1)
-    console.log("🔍 Intentando nuevo selector del balance (ACTUALIZADO)...");
     try {
-      await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-etzZfr.hJDEkH.gbMWSi > div.sc-blHHSb.kbMxlb > div.sc-ivxoEo.dTydep > span', { timeout: 15000 });
+      // Esperar a que el contenedor del balance esté disponible
+      await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(2) > div > div > div > div', { timeout: 15000 });
       
-      const balanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-etzZfr.hJDEkH.gbMWSi > div.sc-blHHSb.kbMxlb > div.sc-ivxoEo.dTydep > span');
-      balance = await page.evaluate(element => element.textContent, balanceContainer);
-      balanceFound = true;
-      console.log(`✅ Balance encontrado con nuevo selector (ACTUALIZADO): ${balance}`);
-    } catch (newSelectorError) {
-      console.log(`⚠️ Nuevo selector (ACTUALIZADO) no encontrado: ${newSelectorError.message}`);
+      // Dentro del contenedor, buscar el span que contiene el valor numérico
+      // Asumiendo que el span con el balance está dentro de este div
+      // Podría ser necesario ajustar este selector si la estructura interna es diferente
+      const balanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(2) > div > div > div > div');
+      // Intentar encontrar el span directamente dentro del contenedor o sus hijos
+      const balanceSpan = await balanceContainer.$('span');
+      if (balanceSpan) {
+          balance = await page.evaluate(element => element.textContent, balanceSpan);
+          balanceFound = true;
+          console.log(`✅ Balance encontrado con nuevo selector (contenedor): ${balance}`);
+      } else {
+          console.log("⚠️ No se encontró un span dentro del contenedor del balance.");
+      }
+    } catch (balanceContainerError) {
+      console.log(`⚠️ Nuevo selector de contenedor del balance no encontrado: ${balanceContainerError.message}`);
     }
     
-    // Si el nuevo selector (ACTUALIZADO) falla, intentar con los anteriores (TAMBIÉN ACTUALIZADOS)
+    // Si no se encontró con el contenedor, intentar con selectores anteriores o texto
     if (!balanceFound) {
         // Intentar con el selector original (el más largo) - ACTUALIZADO A nth-child(1)
         try {
@@ -312,39 +320,17 @@ async function runCycle() {
     // Esperar un poco para que se cargue el contenido del botón/conteo
     await page.waitForTimeout(3000);
     
-    // Primero intentamos encontrar el conteo regresivo con el NUEVO selector (ACTUALIZADO A nth-child(5))
+    // Primero intentamos encontrar el conteo regresivo
+    // Asumiendo que está en el contenedor nth-child(5), buscar el elemento .time
     try {
+      // Selector más específico para el elemento del tiempo dentro del contenedor correcto
       const newCountdownSelector = "#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(5) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div > div";
-      console.log("🔍 Intentando nuevo selector del conteo regresivo (ACTUALIZADO)...");
+      console.log("🔍 Intentando nuevo selector del conteo regresivo (en contenedor 5)...");
       await page.waitForSelector(newCountdownSelector, { timeout: 5000 });
       const countdownText = await page.$eval(newCountdownSelector, el => el.textContent);
       
-      // Extraer solo la parte del tiempo (eliminar "Next pot available in")
-      const timePart = countdownText.replace(/Next pot available in/i, '').trim();
-      console.log(`⏳ Conteo regresivo encontrado: ${timePart}`);
-      
-      // Parsear el tiempo y calcular espera
-      const timeObj = parseCountdownText(timePart);
-      const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
-      
-      // Programar el próximo ciclo
-      const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
-      const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-      console.log(`⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-      
-      // Esperar el tiempo calculado antes de repetir
-      setTimeout(runCycle, waitTimeMs);
-      
-    } catch (newCountdownError) {
-      console.log(`⚠️ Nuevo selector de conteo regresivo (ACTUALIZADO) no encontrado: ${newCountdownError.message}`);
-      
-      // Si el nuevo selector (ACTUALIZADO) falla, intentar con el selector anterior (TAMBIÉN ACTUALIZADO A nth-child(5))
-      try {
-        const oldCountdownSelector = "#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(5) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div > div"; // Cambiado a nth-child(5)
-        console.log("🔍 Intentando selector anterior del conteo regresivo (ACTUALIZADO)...");
-        await page.waitForSelector(oldCountdownSelector, { timeout: 5000 });
-        const countdownText = await page.$eval(oldCountdownSelector, el => el.textContent);
-        
+      // Verificar si el texto contiene "Next pot available in" para confirmar que es el conteo
+      if (countdownText.toLowerCase().includes("next pot available in")) {
         // Extraer solo la parte del tiempo (eliminar "Next pot available in")
         const timePart = countdownText.replace(/Next pot available in/i, '').trim();
         console.log(`⏳ Conteo regresivo encontrado: ${timePart}`);
@@ -360,299 +346,166 @@ async function runCycle() {
         
         // Esperar el tiempo calculado antes de repetir
         setTimeout(runCycle, waitTimeMs);
+      } else {
+        // Si no contiene "Next pot available in", probablemente es el botón
+        console.log("ℹ️ Contenido en contenedor 5 no es conteo regresivo, asumiendo es botón.");
+        throw new Error("No es conteo regresivo"); // Lanzar un error para ir al catch
+      }
+    } catch (newCountdownError) {
+      console.log(`⚠️ Contenido en contenedor 5 no es conteo regresivo o no encontrado: ${newCountdownError.message}`);
+      
+      // Si no hay conteo regresivo en contenedor 5, verificar si hay botón de reclamar
+      console.log("ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar...");
+      
+      // Intentar con el NUEVO selector del botón de reclamar (el que me proporcionaste - en contenedor 5)
+      console.log("🔍 Intentando nuevo selector del botón de reclamar (en contenedor 5)...");
+      try {
+        // El selector que proporcionaste apunta al span dentro del botón en nth-child(5)
+        const newClaimButtonSelector = "#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(5) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div > button > span > div > span";
+        await page.waitForSelector(newClaimButtonSelector, { timeout: 5000 });
+        console.log("✅ Botón de reclamar encontrado (nuevo selector - en contenedor 5). Haciendo clic para reclamar el premio...");
         
-      } catch (oldCountdownError) {
-        console.log(`⚠️ Selector anterior de conteo regresivo (ACTUALIZADO) no encontrado: ${oldCountdownError.message}`);
+        // Hacer clic en el botón de reclamar (en el span específico)
+        await page.click(newClaimButtonSelector);
         
-        // Si ambos selectores de conteo (ACTUALIZADOS) fallan, verificar si hay botón de reclamar
-        console.log("ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar...");
+        // Esperar un momento después de reclamar
+        console.log("⏳ Esperando después de reclamar el premio...");
+        await page.waitForTimeout(5000);
         
-        // Intentar con el NUEVO selector del botón de reclamar (el que me proporcionaste - ACTUALIZADO A nth-child(5))
-        console.log("🔍 Intentando nuevo selector del botón de reclamar (ACTUALIZADO)...");
+        // Refrescar la página para obtener el balance actualizado
+        console.log("🔄 Refrescando página para obtener balance actualizado...");
+        await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+        await page.waitForTimeout(5000);
+        
+        // Verificar el nuevo balance
+        console.log("🔍 Verificando nuevo balance...");
+        // Reutilizar la lógica de búsqueda de balance actualizada
+        let newBalance = "0";
+        let newBalanceFound = false;
+        
+        // Estrategia 1: Intentar con el nuevo selector del contenedor del balance
+        console.log("🔍 Intentando nuevo selector del balance (contenedor - nuevo)...");
         try {
-          // El selector que proporcionaste apunta al span dentro del botón
-          const newClaimButtonSelector = "#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(5) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div > button > span > div > span";
-          await page.waitForSelector(newClaimButtonSelector, { timeout: 5000 });
-          console.log("✅ Botón de reclamar encontrado (nuevo selector - ACTUALIZADO). Haciendo clic para reclamar el premio...");
+          // Esperar a que el contenedor del balance esté disponible
+          await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(2) > div > div > div > div', { timeout: 15000 });
           
-          // Hacer clic en el botón de reclamar (en el span específico)
-          await page.click(newClaimButtonSelector);
-          
-          // Esperar un momento después de reclamar
-          console.log("⏳ Esperando después de reclamar el premio...");
-          await page.waitForTimeout(5000);
-          
-          // Refrescar la página para obtener el balance actualizado
-          console.log("🔄 Refrescando página para obtener balance actualizado...");
-          await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-          await page.waitForTimeout(5000);
-          
-          // Verificar el nuevo balance
-          console.log("🔍 Verificando nuevo balance...");
-          // Reutilizar la lógica de búsqueda de balance actualizada
-          let newBalance = "0";
-          let newBalanceFound = false;
-          
-          // Estrategia 1: Intentar con el nuevo selector del balance (el que me proporcionaste) - ACTUALIZADO
-          console.log("🔍 Intentando nuevo selector del balance (nuevo - ACTUALIZADO)...");
-          try {
-            await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-etzZfr.hJDEkH.gbMWSi > div.sc-blHHSb.kbMxlb > div.sc-ivxoEo.dTydep > span', { timeout: 15000 });
-            
-            const newBalanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-etzZfr.hJDEkH.gbMWSi > div.sc-blHHSb.kbMxlb > div.sc-ivxoEo.dTydep > span');
-            newBalance = await page.evaluate(element => element.textContent, newBalanceContainer);
-            newBalanceFound = true;
-            console.log(`✅ Nuevo balance encontrado con nuevo selector (ACTUALIZADO): ${newBalance}`);
-          } catch (newSelectorErrorNew) {
-            console.log(`⚠️ Nuevo selector (ACTUALIZADO) no encontrado (nuevo): ${newSelectorErrorNew.message}`);
-          }
-          
-          // Si el nuevo selector (ACTUALIZADO) falla, intentar con los anteriores (TAMBIÉN ACTUALIZADOS)
-          if (!newBalanceFound) {
-              // Intentar con el selector original (el más largo) - ACTUALIZADO
-              try {
-                console.log("🔍 Intentando selector original del balance (nuevo - ACTUALIZADO)...");
-                await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-gnElHG.hJDEkH.XGcis', { timeout: 15000 });
-                
-                const newBalanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-gnElHG.hJDEkH.XGcis');
-                const newBalanceText = await page.evaluate(element => element.textContent, newBalanceContainer);
-                
-                const newBalanceMatch = newBalanceText.match(/Current Balance\s*([\d,.]+)/i);
-                if (newBalanceMatch && newBalanceMatch[1]) {
-                  newBalance = newBalanceMatch[1];
-                  newBalanceFound = true;
-                  console.log(`✅ Nuevo balance encontrado con selector original (ACTUALIZADO): ${newBalance}`);
-                } else {
-                  console.log(`⚠️ No se encontró el valor numérico con el selector original (nuevo - ACTUALIZADO). Texto completo: "${newBalanceText}"`);
-                }
-              } catch (originalSelectorErrorNew) {
-                console.log(`⚠️ Selector original (ACTUALIZADO) no encontrado (nuevo): ${originalSelectorErrorNew.message}`);
-              }
-          }
-          
-          // Estrategia 2: Si los anteriores fallan, buscar por contenido textual
-          if (!newBalanceFound) {
-            console.log("🔍 Buscando nuevo balance por contenido textual...");
-            try {
-              await page.waitForFunction(() => {
-                const elements = document.querySelectorAll('div, span, p');
-                for (let elem of elements) {
-                  const text = elem.textContent;
-                  if (text && text.includes('Current Balance')) {
-                    const match = text.match(/Current Balance\s*([\d,.]+)/i);
-                    if (match && match[1]) {
-                      return match[1];
-                    }
-                  }
-                }
-                return null;
-              }, { timeout: 15000 });
-              
-              const newBalanceValue = await page.evaluate(() => {
-                const elements = document.querySelectorAll('div, span, p');
-                for (let elem of elements) {
-                  const text = elem.textContent;
-                  if (text && text.includes('Current Balance')) {
-                    const match = text.match(/Current Balance\s*([\d,.]+)/i);
-                    if (match && match[1]) {
-                      return match[1];
-                    }
-                  }
-                }
-                return null;
-              });
-              
-              if (newBalanceValue) {
-                newBalance = newBalanceValue;
-                newBalanceFound = true;
-                console.log(`✅ Nuevo balance encontrado por contenido textual: ${newBalance}`);
-              } else {
-                console.log("⚠️ No se pudo encontrar el nuevo balance por contenido textual.");
-              }
-            } catch (textContentErrorNew) {
-              console.log(`⚠️ Error buscando nuevo balance por contenido textual: ${textContentErrorNew.message}`);
-            }
-          }
-          
-          // Estrategia 3: Si las anteriores fallan, usar un selector más genérico
-          if (!newBalanceFound) {
-            console.log("🔍 Buscando nuevo balance con selector genérico...");
-            try {
-              await page.waitForSelector('.sc-bdnyFh.bcYZov', { timeout: 5000 });
-              const newBalanceElement = await page.$('.sc-bdnyFh.bcYZov');
-              if (newBalanceElement) {
-                newBalance = await page.evaluate(element => element.textContent.trim(), newBalanceElement);
-                newBalanceFound = true;
-                console.log(`✅ Nuevo balance encontrado con selector genérico: ${newBalance}`);
-              } else {
-                console.log("⚠️ Elemento con selector genérico encontrado pero sin contenido (nuevo).");
-              }
-            } catch (genericSelectorErrorNew) {
-              console.log(`⚠️ Selector genérico no encontrado (nuevo): ${genericSelectorErrorNew.message}`);
-            }
-          }
-          
-          if (!newBalanceFound) {
-            throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
-          }
-          
-          const { dateStr: newDateTimeDate, timeStr: newDateTimeTime } = getCurrentDateTime();
-          if (newBalance !== balance) {
-            console.log(`🎉 Balance incrementado el ${newDateTimeDate} a las ${newDateTimeTime} : ${balance} → ${newBalance}`);
-          } else {
-            console.log(`ℹ️ Balance sin cambios el ${newDateTimeDate} a las ${newDateTimeTime} : ${balance} → ${newBalance}`);
-          }
-          
-          // Esperar 5 minutos antes del próximo intento
-          console.log("⏰ Próximo intento en 5 minutos...");
-          setTimeout(runCycle, 300000); // 5 minutos
-          
-        } catch (newClaimButtonError) {
-          console.log(`⚠️ Nuevo selector de botón de reclamar (ACTUALIZADO) no encontrado: ${newClaimButtonError.message}`);
-          
-          // Si el nuevo selector (ACTUALIZADO) falla, intentar con el selector anterior del botón de reclamar (TAMBIÉN ACTUALIZADO A nth-child(5))
-          console.log("🔍 Intentando selector anterior del botón de reclamar (ACTUALIZADO)...");
-          try {
-            // El selector anterior también debe apuntar al span dentro del botón, pero en nth-child(5)
-            const oldClaimButtonSelector = "#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(5) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div > button > span > div > span"; // Cambiado a nth-child(5)
-            await page.waitForSelector(oldClaimButtonSelector, { timeout: 5000 });
-            console.log("✅ Botón de reclamar encontrado (selector anterior - ACTUALIZADO). Haciendo clic para reclamar el premio...");
-            
-            // Hacer clic en el botón de reclamar (en el span específico)
-            await page.click(oldClaimButtonSelector);
-            
-            // Esperar un momento después de reclamar
-            console.log("⏳ Esperando después de reclamar el premio...");
-            await page.waitForTimeout(5000);
-            
-            // Refrescar la página para obtener el balance actualizado
-            console.log("🔄 Refrescando página para obtener balance actualizado...");
-            await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-            await page.waitForTimeout(5000);
-            
-            // Verificar el nuevo balance
-            console.log("🔍 Verificando nuevo balance...");
-            // Reutilizar la lógica de búsqueda de balance actualizada
-            let newBalance = "0";
-            let newBalanceFound = false;
-            
-            // Estrategia 1: Intentar con el nuevo selector del balance (el que me proporcionaste) - ACTUALIZADO
-            console.log("🔍 Intentando nuevo selector del balance (nuevo - ACTUALIZADO)...");
-            try {
-              await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-etzZfr.hJDEkH.gbMWSi > div.sc-blHHSb.kbMxlb > div.sc-ivxoEo.dTydep > span', { timeout: 15000 });
-              
-              const newBalanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-etzZfr.hJDEkH.gbMWSi > div.sc-blHHSb.kbMxlb > div.sc-ivxoEo.dTydep > span');
-              newBalance = await page.evaluate(element => element.textContent, newBalanceContainer);
+          // Dentro del contenedor, buscar el span que contiene el valor numérico
+          const newBalanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(2) > div > div > div > div');
+          const newBalanceSpan = await newBalanceContainer.$('span');
+          if (newBalanceSpan) {
+              newBalance = await page.evaluate(element => element.textContent, newBalanceSpan);
               newBalanceFound = true;
-              console.log(`✅ Nuevo balance encontrado con nuevo selector (ACTUALIZADO): ${newBalance}`);
-            } catch (newSelectorErrorNew) {
-              console.log(`⚠️ Nuevo selector (ACTUALIZADO) no encontrado (nuevo): ${newSelectorErrorNew.message}`);
-            }
-            
-            // Si el nuevo selector (ACTUALIZADO) falla, intentar con los anteriores (TAMBIÉN ACTUALIZADOS)
-            if (!newBalanceFound) {
-                // Intentar con el selector original (el más largo) - ACTUALIZADO
-                try {
-                  console.log("🔍 Intentando selector original del balance (nuevo - ACTUALIZADO)...");
-                  await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-gnElHG.hJDEkH.XGcis', { timeout: 15000 });
-                  
-                  const newBalanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-gnElHG.hJDEkH.XGcis');
-                  const newBalanceText = await page.evaluate(element => element.textContent, newBalanceContainer);
-                  
-                  const newBalanceMatch = newBalanceText.match(/Current Balance\s*([\d,.]+)/i);
-                  if (newBalanceMatch && newBalanceMatch[1]) {
-                    newBalance = newBalanceMatch[1];
-                    newBalanceFound = true;
-                    console.log(`✅ Nuevo balance encontrado con selector original (ACTUALIZADO): ${newBalance}`);
-                  } else {
-                    console.log(`⚠️ No se encontró el valor numérico con el selector original (nuevo - ACTUALIZADO). Texto completo: "${newBalanceText}"`);
-                  }
-                } catch (originalSelectorErrorNew) {
-                  console.log(`⚠️ Selector original (ACTUALIZADO) no encontrado (nuevo): ${originalSelectorErrorNew.message}`);
-                }
-            }
-            
-            // Estrategia 2: Si los anteriores fallan, buscar por contenido textual
-            if (!newBalanceFound) {
-              console.log("🔍 Buscando nuevo balance por contenido textual...");
-              try {
-                await page.waitForFunction(() => {
-                  const elements = document.querySelectorAll('div, span, p');
-                  for (let elem of elements) {
-                    const text = elem.textContent;
-                    if (text && text.includes('Current Balance')) {
-                      const match = text.match(/Current Balance\s*([\d,.]+)/i);
-                      if (match && match[1]) {
-                        return match[1];
-                      }
-                    }
-                  }
-                  return null;
-                }, { timeout: 15000 });
-                
-                const newBalanceValue = await page.evaluate(() => {
-                  const elements = document.querySelectorAll('div, span, p');
-                  for (let elem of elements) {
-                    const text = elem.textContent;
-                    if (text && text.includes('Current Balance')) {
-                      const match = text.match(/Current Balance\s*([\d,.]+)/i);
-                      if (match && match[1]) {
-                        return match[1];
-                      }
-                    }
-                  }
-                  return null;
-                });
-                
-                if (newBalanceValue) {
-                  newBalance = newBalanceValue;
-                  newBalanceFound = true;
-                  console.log(`✅ Nuevo balance encontrado por contenido textual: ${newBalance}`);
-                } else {
-                  console.log("⚠️ No se pudo encontrar el nuevo balance por contenido textual.");
-                }
-              } catch (textContentErrorNew) {
-                console.log(`⚠️ Error buscando nuevo balance por contenido textual: ${textContentErrorNew.message}`);
+              console.log(`✅ Nuevo balance encontrado con nuevo selector (contenedor): ${newBalance}`);
+          } else {
+              console.log("⚠️ No se encontró un span dentro del contenedor del balance (nuevo).");
+          }
+        } catch (newBalanceContainerError) {
+          console.log(`⚠️ Nuevo selector de contenedor del balance no encontrado (nuevo): ${newBalanceContainerError.message}`);
+        }
+        
+        // Si no se encontró con el contenedor, intentar con selectores anteriores o texto
+        if (!newBalanceFound) {
+            // Intentar con el selector original (el más largo) - ACTUALIZADO A nth-child(1)
+            try {
+              console.log("🔍 Intentando selector original del balance (nuevo - ACTUALIZADO)...");
+              await page.waitForSelector('#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-gnElHG.hJDEkH.XGcis', { timeout: 15000 });
+              
+              const newBalanceContainer = await page.$('#root > div.sc-cSzYSJ.hZVuLe > div.sc-jwpOCX.cDWKqV > div > main > div > div > div:nth-child(1) > div > div > div > div > div.sc-blHHSb.sc-gnElHG.hJDEkH.XGcis');
+              const newBalanceText = await page.evaluate(element => element.textContent, newBalanceContainer);
+              
+              const newBalanceMatch = newBalanceText.match(/Current Balance\s*([\d,.]+)/i);
+              if (newBalanceMatch && newBalanceMatch[1]) {
+                newBalance = newBalanceMatch[1];
+                newBalanceFound = true;
+                console.log(`✅ Nuevo balance encontrado con selector original (ACTUALIZADO): ${newBalance}`);
+              } else {
+                console.log(`⚠️ No se encontró el valor numérico con el selector original (nuevo - ACTUALIZADO). Texto completo: "${newBalanceText}"`);
               }
+            } catch (originalSelectorErrorNew) {
+              console.log(`⚠️ Selector original (ACTUALIZADO) no encontrado (nuevo): ${originalSelectorErrorNew.message}`);
             }
-            
-            // Estrategia 3: Si las anteriores fallan, usar un selector más genérico
-            if (!newBalanceFound) {
-              console.log("🔍 Buscando nuevo balance con selector genérico...");
-              try {
-                await page.waitForSelector('.sc-bdnyFh.bcYZov', { timeout: 5000 });
-                const newBalanceElement = await page.$('.sc-bdnyFh.bcYZov');
-                if (newBalanceElement) {
-                  newBalance = await page.evaluate(element => element.textContent.trim(), newBalanceElement);
-                  newBalanceFound = true;
-                  console.log(`✅ Nuevo balance encontrado con selector genérico: ${newBalance}`);
-                } else {
-                  console.log("⚠️ Elemento con selector genérico encontrado pero sin contenido (nuevo).");
+        }
+        
+        // Estrategia 2: Si los anteriores fallan, buscar por contenido textual
+        if (!newBalanceFound) {
+          console.log("🔍 Buscando nuevo balance por contenido textual...");
+          try {
+            await page.waitForFunction(() => {
+              const elements = document.querySelectorAll('div, span, p');
+              for (let elem of elements) {
+                const text = elem.textContent;
+                if (text && text.includes('Current Balance')) {
+                  const match = text.match(/Current Balance\s*([\d,.]+)/i);
+                  if (match && match[1]) {
+                    return match[1];
+                  }
                 }
-              } catch (genericSelectorErrorNew) {
-                console.log(`⚠️ Selector genérico no encontrado (nuevo): ${genericSelectorErrorNew.message}`);
               }
-            }
+              return null;
+            }, { timeout: 15000 });
             
-            if (!newBalanceFound) {
-              throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
-            }
+            const newBalanceValue = await page.evaluate(() => {
+              const elements = document.querySelectorAll('div, span, p');
+              for (let elem of elements) {
+                const text = elem.textContent;
+                if (text && text.includes('Current Balance')) {
+                  const match = text.match(/Current Balance\s*([\d,.]+)/i);
+                  if (match && match[1]) {
+                    return match[1];
+                  }
+                }
+              }
+              return null;
+            });
             
-            const { dateStr: newDateTimeDate, timeStr: newDateTimeTime } = getCurrentDateTime();
-            if (newBalance !== balance) {
-              console.log(`🎉 Balance incrementado el ${newDateTimeDate} a las ${newDateTimeTime} : ${balance} → ${newBalance}`);
+            if (newBalanceValue) {
+              newBalance = newBalanceValue;
+              newBalanceFound = true;
+              console.log(`✅ Nuevo balance encontrado por contenido textual: ${newBalance}`);
             } else {
-              console.log(`ℹ️ Balance sin cambios el ${newDateTimeDate} a las ${newDateTimeTime} : ${balance} → ${newBalance}`);
+              console.log("⚠️ No se pudo encontrar el nuevo balance por contenido textual.");
             }
-            
-            // Esperar 5 minutos antes del próximo intento
-            console.log("⏰ Próximo intento en 5 minutos...");
-            setTimeout(runCycle, 300000); // 5 minutos
-            
-          } catch (oldClaimButtonError) {
-            console.log("⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...");
-            setTimeout(runCycle, 300000); // 5 minutos
+          } catch (textContentErrorNew) {
+            console.log(`⚠️ Error buscando nuevo balance por contenido textual: ${textContentErrorNew.message}`);
           }
         }
+        
+        // Estrategia 3: Si las anteriores fallan, usar un selector más genérico
+        if (!newBalanceFound) {
+          console.log("🔍 Buscando nuevo balance con selector genérico...");
+          try {
+            await page.waitForSelector('.sc-bdnyFh.bcYZov', { timeout: 5000 });
+            const newBalanceElement = await page.$('.sc-bdnyFh.bcYZov');
+            if (newBalanceElement) {
+              newBalance = await page.evaluate(element => element.textContent.trim(), newBalanceElement);
+              newBalanceFound = true;
+              console.log(`✅ Nuevo balance encontrado con selector genérico: ${newBalance}`);
+            } else {
+              console.log("⚠️ Elemento con selector genérico encontrado pero sin contenido (nuevo).");
+            }
+          } catch (genericSelectorErrorNew) {
+            console.log(`⚠️ Selector genérico no encontrado (nuevo): ${genericSelectorErrorNew.message}`);
+          }
+        }
+        
+        if (!newBalanceFound) {
+          throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
+        }
+        
+        const { dateStr: newDateTimeDate, timeStr: newDateTimeTime } = getCurrentDateTime();
+        if (newBalance !== balance) {
+          console.log(`🎉 Balance incrementado el ${newDateTimeDate} a las ${newDateTimeTime} : ${balance} → ${newBalance}`);
+        } else {
+          console.log(`ℹ️ Balance sin cambios el ${newDateTimeDate} a las ${newDateTimeTime} : ${balance} → ${newBalance}`);
+        }
+        
+        // Esperar 5 minutos antes del próximo intento
+        console.log("⏰ Próximo intento en 5 minutos...");
+        setTimeout(runCycle, 300000); // 5 minutos
+        
+      } catch (newClaimButtonError) {
+        console.log(`⚠️ No se encontró ni conteo regresivo ni botón de reclamar en contenedor 5. Reintentando en 5 minutos...`);
+        setTimeout(runCycle, 300000); // 5 minutos
       }
     }
 
