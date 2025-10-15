@@ -129,6 +129,43 @@ async function findElementByNthChild(baseSelector, nthValues, description) {
   return null;
 }
 
+// Función para extraer el balance numérico de un contenedor ya encontrado
+async function extractBalanceFromContainer(containerElement) {
+    if (!containerElement) {
+        console.log(`${getCurrentTimestamp()} ⚠️ Contenedor de balance no proporcionado para extracción.`);
+        return null;
+    }
+    try {
+        // 1. Obtener todo el texto del contenedor
+        const fullText = await page.evaluate(element => element.textContent, containerElement);
+        console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
+
+        // 2. Buscar un patrón numérico que coincida con formatos comunes de balance
+        //    Este regex busca: dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
+        //    Ej: 1,234.56, 1234.56, 1.234,56
+        //    Busca el último número que aparezca en el texto (por si hay más texto después)
+        const balanceRegex = /([\d.,]+\d)/g; // \d al final asegura que termina en número
+        const matches = fullText.match(balanceRegex);
+        if (matches) {
+            // Tomar el último match como el balance (por si hay múltiples números)
+            const potentialBalance = matches[matches.length - 1];
+            console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado: "${potentialBalance}"`);
+            // Validar que el match tenga sentido como balance (no es solo un número suelto)
+            // Una simple validación: que tenga al menos un separador (, o .) o sea mayor a 999
+            if (potentialBalance.includes(',') || potentialBalance.includes('.') || parseInt(potentialBalance.replace(/,/g, '').replace(/\./g, ''), 10) > 999) {
+                return potentialBalance;
+            } else {
+                console.log(`${getCurrentTimestamp()} ⚠️ El valor potencial "${potentialBalance}" no parece un balance válido.`);
+            }
+        } else {
+            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un patrón numérico de balance en el texto del contenedor.`);
+        }
+    } catch (e) {
+        console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer balance del contenedor: ${e.message}`);
+    }
+    return null;
+}
+
 // Función principal del ciclo
 async function runCycle() {
   try {
@@ -236,22 +273,14 @@ async function runCycle() {
     if (balanceContainerSelector) {
         try {
           const balanceContainer = await page.$(balanceContainerSelector);
-          // Buscar el span que contiene el valor numérico dentro del contenedor
-          // Asumiendo que el balance es un número dentro de un span
-          const balanceSpan = await balanceContainer.$('span');
-          if (balanceSpan) {
-              const balanceText = await page.evaluate(element => element.textContent, balanceSpan);
-              // Extraer solo el valor numérico del texto del span (puede contener "Current Balance 1234.56")
-              const balanceMatch = balanceText.match(/([\d,.]+)/);
-              if (balanceMatch && balanceMatch[1]) {
-                balance = balanceMatch[1];
-                balanceFound = true;
-                console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
-              } else {
-                  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró valor numérico en el span del balance. Texto completo: "${balanceText}"`);
-              }
+          // Usar la nueva función para extraer el balance del contenedor
+          const extractedBalance = await extractBalanceFromContainer(balanceContainer);
+          if (extractedBalance) {
+              balance = extractedBalance;
+              balanceFound = true;
+              console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
           } else {
-              console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un span dentro del contenedor del balance.`);
+              console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor encontrado.`);
           }
         } catch (e) {
           console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer balance del contenedor encontrado: ${e.message}`);
@@ -344,19 +373,14 @@ async function runCycle() {
               if (newBalanceContainerSelector) {
                   try {
                     const newBalanceContainer = await page.$(newBalanceContainerSelector);
-                    const newBalanceSpan = await newBalanceContainer.$('span');
-                    if (newBalanceSpan) {
-                        const newBalanceText = await page.evaluate(element => element.textContent, newBalanceSpan);
-                        const newBalanceMatch = newBalanceText.match(/([\d,.]+)/);
-                        if (newBalanceMatch && newBalanceMatch[1]) {
-                          newBalance = newBalanceMatch[1];
-                          newBalanceFound = true;
-                          console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
-                        } else {
-                            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró valor numérico en el span del nuevo balance. Texto completo: "${newBalanceText}"`);
-                        }
+                    // Usar la nueva función para extraer el balance del contenedor
+                    const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
+                    if (extractedNewBalance) {
+                        newBalance = extractedNewBalance;
+                        newBalanceFound = true;
+                        console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
                     } else {
-                        console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un span dentro del contenedor del nuevo balance.`);
+                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance.`);
                     }
                   } catch (e) {
                     console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado: ${e.message}`);
