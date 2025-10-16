@@ -7,7 +7,7 @@ function getCurrentTimestamp() {
   const day = String(now.getDate()).padStart(2, '0');
   const month = now.toLocaleDateString('en-US', { month: 'short' }); // Ej: Oct
   const year = String(now.getFullYear()).slice(-2); // Últimos 2 dígitos del año
-  const timeStr = now.toLocaleTimeString('es-ES', { 
+  const timeStr = now.toLocaleTimeString('es-ES', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
@@ -21,7 +21,7 @@ function parseCountdownText(countdownText) {
   // Ejemplo: "06 hours 23 min 28 sec" -> { hours: 6, minutes: 23, seconds: 28 }
   const regex = /(\d+) hours (\d+) min (\d+) sec/;
   const match = countdownText.match(regex);
-  
+
   if (match && match.length === 4) {
     return {
       hours: parseInt(match[1], 10),
@@ -29,7 +29,7 @@ function parseCountdownText(countdownText) {
       seconds: parseInt(match[3], 10)
     };
   }
-  
+
   // Si no coincide el formato, asumir 0 segundos para evitar errores
   console.warn(`${getCurrentTimestamp()} ⚠️ No se pudo parsear el texto del temporizador: "${countdownText}". Usando 0 segundos.`);
   return { hours: 0, minutes: 0, seconds: 0 };
@@ -49,7 +49,7 @@ function getFutureTime(milliseconds) {
     month: 'short',
     year: 'numeric'
   });
-  const timeStr = future.toLocaleTimeString('es-ES', { 
+  const timeStr = future.toLocaleTimeString('es-ES', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
@@ -138,7 +138,7 @@ async function extractBalanceFromContainer(containerElement) {
     try {
         // 1. Obtener todo el texto del contenedor
         const fullText = await page.evaluate(element => element.textContent, containerElement);
-        //console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
+        console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
 
         // 2. Buscar la posición de "Current balance"
         const balanceLabelIndex = fullText.toLowerCase().indexOf('current balance');
@@ -149,7 +149,7 @@ async function extractBalanceFromContainer(containerElement) {
 
         // 3. Extraer el texto que viene después de "Current balance"
         const textAfterLabel = fullText.substring(balanceLabelIndex + 'current balance'.length).trim();
-        //console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
+        console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
 
         // 4. Buscar un patrón numérico que coincida con formatos comunes de balance en ese fragmento
         //    Busca dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
@@ -159,7 +159,7 @@ async function extractBalanceFromContainer(containerElement) {
 
         if (match && match[1]) {
             const potentialBalance = match[1];
-            //console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado después de 'Current balance': "${potentialBalance}"`);
+            console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado después de 'Current balance': "${potentialBalance}"`);
             // Validar que el match tenga sentido como balance (no es solo un número suelto)
             // Una simple validación: que tenga al menos un separador (, o .) o sea mayor a 999
             if (potentialBalance.includes(',') || potentialBalance.includes('.') || parseInt(potentialBalance.replace(/,/g, '').replace(/\./g, ''), 10) > 999) {
@@ -205,7 +205,7 @@ async function runCycle() {
       });
 
       page = await browser.newPage();
-      
+
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
       const response = await page.goto("https://dashboard.honeygain.com/login", {
         waitUntil: "networkidle2",
@@ -246,11 +246,11 @@ async function runCycle() {
       // Realizar login
       if (await login()) {
         console.log(`${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.`);
-        
+
         // Verificar que estamos en el dashboard
         const currentUrl = page.url();
         console.log(`${getCurrentTimestamp()} 📍 URL después del login: ${currentUrl}`);
-        
+
         if (!currentUrl.includes("dashboard.honeygain.com/")) {
           throw new Error("No se pudo acceder al dashboard después del login");
         }
@@ -288,7 +288,7 @@ async function runCycle() {
           if (extractedBalance) {
               balance = extractedBalance;
               balanceFound = true;
-              //console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
+              console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
           } else {
               console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor encontrado.`);
           }
@@ -305,7 +305,7 @@ async function runCycle() {
 
     // Verificar si aparece el conteo regresivo o el botón de reclamar
     console.log(`${getCurrentTimestamp()} 🔍 Verificando si hay conteo regresivo o botón de reclamar...`);
-    
+
     // Esperar un poco para que se cargue el contenido del botón/conteo
     await page.waitForTimeout(3000);
 
@@ -328,16 +328,16 @@ async function runCycle() {
                 // Extraer solo la parte del tiempo (eliminar "Next pot available in")
                 const timePart = countdownText.replace(/Next pot available in/i, '').trim();
                 console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado: ${timePart}`);
-                
+
                 // Parsear el tiempo y calcular espera
                 const timeObj = parseCountdownText(timePart);
                 const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
-                
+
                 // Programar el próximo ciclo
                 const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
                 const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
                 console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-                
+
                 // Esperar el tiempo calculado antes de repetir
                 setTimeout(runCycle, waitTimeMs);
                 countdownFound = true;
@@ -351,68 +351,76 @@ async function runCycle() {
     if (!countdownFound) {
         // Si no hay conteo regresivo, verificar si hay botón de reclamar
         console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar en contenedor encontrado...`);
-        
+
         if (potContainerSelector) {
             try {
-              // El botón de reclamar debería estar dentro del mismo contenedor general
-              // Selector más específico para el botón dentro del contenedor encontrado
-              const claimButtonSelector = `${potContainerSelector} button > span > div > span`;
-              await page.waitForSelector(claimButtonSelector, { timeout: 5000 });
-              console.log(`${getCurrentTimestamp()} ✅ Botón de reclamar encontrado (en contenedor encontrado). Haciendo clic para reclamar el premio...`);
-              
-              // Hacer clic en el botón de reclamar
-              await page.click(claimButtonSelector);
-              
-              // Esperar un momento después de reclamar
-              console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
-              await page.waitForTimeout(5000);
-              
-              // Refrescar la página para obtener el balance actualizado
-              console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
-              await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-              await page.waitForTimeout(5000);
-              
-              // Verificar el nuevo balance
-              console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo balance...`);
-              // Reutilizar la lógica de búsqueda de balance actualizada
-              let newBalance = "0";
-              let newBalanceFound = false;
+              // *** Cambio clave aquí ***
+              // En lugar de usar un selector interno muy específico, buscamos el botón directamente
+              // dentro del contenedor ya encontrado.
+              const claimButton = await page.$(`${potContainerSelector} button`);
+              if (claimButton) {
+                  // Verificar el texto del botón para asegurarnos
+                  const buttonText = await page.evaluate(el => el.textContent, claimButton);
+                  console.log(`${getCurrentTimestamp()} ✅ Botón de reclamar encontrado (en contenedor encontrado). Texto del botón: "${buttonText}". Haciendo clic para reclamar el premio...`);
 
-              // Usar la función para encontrar el contenedor del balance (nuevamente después del refresh)
-              const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
-              if (newBalanceContainerSelector) {
-                  try {
-                    const newBalanceContainer = await page.$(newBalanceContainerSelector);
-                    // Usar la nueva función para extraer el balance del contenedor
-                    const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
-                    if (extractedNewBalance) {
-                        newBalance = extractedNewBalance;
-                        newBalanceFound = true;
-                        console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
-                    } else {
-                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance.`);
-                    }
-                  } catch (e) {
-                    console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado: ${e.message}`);
+                  // Hacer clic en el botón de reclamar
+                  await page.click(`${potContainerSelector} button`);
+
+                  // Esperar un momento después de reclamar
+                  console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
+                  await page.waitForTimeout(5000);
+
+                  // Refrescar la página para obtener el balance actualizado
+                  console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
+                  await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+                  await page.waitForTimeout(5000);
+
+                  // Verificar el nuevo balance
+                  console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo balance...`);
+                  // Reutilizar la lógica de búsqueda de balance actualizada
+                  let newBalance = "0";
+                  let newBalanceFound = false;
+
+                  // Usar la función para encontrar el contenedor del balance (nuevamente después del refresh)
+                  const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
+                  if (newBalanceContainerSelector) {
+                      try {
+                        const newBalanceContainer = await page.$(newBalanceContainerSelector);
+                        // Usar la nueva función para extraer el balance del contenedor
+                        const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
+                        if (extractedNewBalance) {
+                            newBalance = extractedNewBalance;
+                            newBalanceFound = true;
+                            console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
+                        } else {
+                            console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance.`);
+                        }
+                      } catch (e) {
+                        console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado: ${e.message}`);
+                      }
                   }
-              }
 
-              if (!newBalanceFound) {
-                throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
-              }
+                  if (!newBalanceFound) {
+                    throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
+                  }
 
-              if (newBalance !== balance) {
-                console.log(`${getCurrentTimestamp()} 🎉 Balance: ${balance} → ${newBalance}`);
+                  if (newBalance !== balance) {
+                    console.log(`${getCurrentTimestamp()} 🎉 Balance: ${balance} → ${newBalance}`);
+                  } else {
+                    console.log(`${getCurrentTimestamp()} ℹ️ Balance: ${balance} (sin cambios)`);
+                  }
+
+                  // Esperar 5 minutos antes del próximo intento
+                  console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
+                  setTimeout(runCycle, 300000); // 5 minutos
+
               } else {
-                console.log(`${getCurrentTimestamp()} ℹ️ Balance: ${balance} (sin cambios)`);
+                  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un botón (<button>) dentro del contenedor encontrado.`);
+                  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
+                  setTimeout(runCycle, 300000); // 5 minutos
               }
-              
-              // Esperar 5 minutos antes del próximo intento
-              console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
-              setTimeout(runCycle, 300000); // 5 minutos
-              
             } catch (claimButtonError) {
-              console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón de reclamar en contenedor encontrado: ${claimButtonError.message}`);
+              console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar botón de reclamar en contenedor encontrado: ${claimButtonError.message}`);
               console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
               setTimeout(runCycle, 300000); // 5 minutos
             }
@@ -424,7 +432,7 @@ async function runCycle() {
 
   } catch (err) {
     console.error(`${getCurrentTimestamp()} ⚠️ Error en el ciclo:`, err.message);
-    
+
     // Intentar reconectar en caso de error
     if (browser) {
       try {
@@ -433,7 +441,7 @@ async function runCycle() {
         console.error(`${getCurrentTimestamp()} ⚠️ Error al cerrar el navegador:`, closeErr.message);
       }
     }
-    
+
     // Reiniciar después de 60 segundos
     console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
     setTimeout(() => {
