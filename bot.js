@@ -177,9 +177,62 @@ async function extractBalanceFromContainer(containerElement) {
     return null;
 }
 
-// Función para encontrar y extraer el conteo regresivo buscando texto en toda la página
+// *** Nueva función: Buscar conteo regresivo por selector CSS ***
+async function findAndExtractCountdownBySelector() {
+    console.log(`${getCurrentTimestamp()} 🔍 Intentando encontrar conteo regresivo por selector CSS...`);
+    try {
+        // Selector basado en el elemento HTML proporcionado
+        // Selecciona el div contenedor principal con las clases específicas
+        const countdownContainerSelector = 'div.sc-duWCru.dPYLJV';
+        
+        // Esperar a que el contenedor esté presente
+        await page.waitForSelector(countdownContainerSelector, { timeout: 5000 });
+        console.log(`${getCurrentTimestamp()} ✅ Contenedor del conteo regresivo encontrado por selector.`);
+
+        // Verificar si contiene el texto "Time left to collect"
+        const container = await page.$(countdownContainerSelector);
+        const containerText = await page.evaluate(el => el.textContent, container);
+        
+        if (containerText && containerText.includes("Time left to collect")) {
+            console.log(`${getCurrentTimestamp()} ✅ Texto 'Time left to collect' encontrado en el contenedor.`);
+            
+            // Buscar el elemento <p> que contiene el temporizador
+            // Este es el segundo <p> dentro del contenedor, o el que tiene la clase específica
+            const timeParagraphSelector = `${countdownContainerSelector} > p.sc-etPtWW.hRiIai`;
+            await page.waitForSelector(timeParagraphSelector, { timeout: 2000 }); // Corto timeout ya que el contenedor existe
+            
+            // Extraer el texto del temporizador del párrafo
+            const timeText = await page.$eval(timeParagraphSelector, el => el.textContent);
+            console.log(`${getCurrentTimestamp()} ✅ Texto del temporizador extraído: ${timeText}`);
+
+            if (timeText) {
+                // Parsear el tiempo y calcular espera
+                const timeObj = parseCountdownText(timeText);
+                const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+
+                // Programar el próximo ciclo
+                const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
+                const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+                console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+
+                return { found: true, waitTimeMs };
+            } else {
+                console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer el texto del temporizador del párrafo encontrado.`);
+            }
+        } else {
+             console.log(`${getCurrentTimestamp()} ⚠️ El contenedor encontrado no contiene el texto 'Time left to collect'.`);
+        }
+    } catch (e) {
+        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo por selector CSS: ${e.message}`);
+    }
+    
+    console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo usando el selector CSS principal.`);
+    return { found: false };
+}
+
+// *** Nueva función: Buscar conteo regresivo por texto en toda la página (fallback) ***
 async function findAndExtractCountdownByText() {
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página...`);
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página (fallback)...`);
     try {
         // Evaluar en toda la página buscando un elemento que contenga EXACTAMENTE el texto esperado
         const countdownInfo = await page.evaluate(() => {
@@ -240,11 +293,6 @@ async function findAndExtractCountdownByText() {
                             }
                         }
                     }
-
-                    // Si no se encontró la estructura de spans, intentar con el texto del div directamente
-                    // (menos preciso, pero puede servir como fallback)
-                    // Esta parte es más compleja y propensa a errores, mejor omitirla por ahora
-                    // y enfocarse en la estructura de spans.
                 }
             }
 
@@ -275,7 +323,6 @@ async function findAndExtractCountdownByText() {
     }
     return { found: false };
 }
-
 
 // Función principal del ciclo
 async function runCycle() {
@@ -410,9 +457,15 @@ async function runCycle() {
     // Esperar un poco para que se cargue el contenido del botón/conteo
     await page.waitForTimeout(3000);
 
-    // *** Nueva estrategia: Buscar conteo regresivo por texto en toda la página ***
-    const countdownResult = await findAndExtractCountdownByText();
+    // *** Nueva lógica: Intentar primero por selector CSS ***
+    let countdownResult = await findAndExtractCountdownBySelector();
 
+    // *** Si falla el selector CSS, intentar por texto ***
+    if (!countdownResult.found) {
+        countdownResult = await findAndExtractCountdownByText();
+    }
+
+    // *** Evaluar el resultado de ambas estrategias ***
     if (countdownResult.found) {
         // Si se encontró el conteo regresivo, programar el próximo ciclo y salir
         setTimeout(runCycle, countdownResult.waitTimeMs);
