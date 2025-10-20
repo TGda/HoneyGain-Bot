@@ -139,7 +139,7 @@ async function extractBalanceFromContainer(containerElement) {
     try {
         // 1. Obtener todo el texto del contenedor
         const fullText = await page.evaluate(element => element.textContent, containerElement);
-        //console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
+        console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
 
         // 2. Buscar la posición de "Current balance"
         const balanceLabelIndex = fullText.toLowerCase().indexOf('current balance');
@@ -150,7 +150,7 @@ async function extractBalanceFromContainer(containerElement) {
 
         // 3. Extraer el texto que viene después de "Current balance"
         const textAfterLabel = fullText.substring(balanceLabelIndex + 'current balance'.length).trim();
-        //console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
+        console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
 
         // 4. Buscar un patrón numérico que coincida con formatos comunes de balance en ese fragmento
         //    Busca dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
@@ -181,72 +181,82 @@ async function extractBalanceFromContainer(containerElement) {
 async function findAndExtractCountdownByText() {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página...`);
     try {
-        // Evaluar en toda la página buscando un elemento que contenga texto relacionado con el conteo
+        // Evaluar en toda la página buscando un elemento que contenga EXACTAMENTE el texto esperado
         const countdownInfo = await page.evaluate(() => {
-            // Lista de textos posibles que pueden preceder al temporizador
-            const possibleLabels = [
-                'next pot available in',
-                'time left to collect'
-            ];
+            // Texto exacto que identifica el conteo regresivo
+            const labelText = "time left to collect";
 
-            // Buscar todos los elementos que puedan contener texto
-            const allElements = document.querySelectorAll('div, span, p, h1, h2, h3, h4, h5, h6');
+            // Buscar todos los divs, ya que el contenedor principal suele ser un div
+            const divElements = document.querySelectorAll('div');
 
-            for (let element of allElements) {
-                const elementText = element.textContent?.toLowerCase();
-                if (!elementText) continue;
+            for (let divElement of divElements) {
+                const divText = divElement.textContent?.toLowerCase().trim();
+                // console.log(`Revisando div: ${divText.substring(0, 50)}...`); // Para debugging
 
-                // Verificar si el texto del elemento contiene alguna de las etiquetas
-                for (const label of possibleLabels) {
-                    if (elementText.includes(label)) {
-                        // Encontramos un elemento con el texto buscado
-                        // Ahora intentamos extraer el temporizador asociado
-                        // Este podría estar en el mismo elemento o en elementos hermanos/descendientes cercanos
-                        
-                        // Estrategia 1: Buscar dentro del mismo elemento o sus hijos inmediatos
-                        let countdownText = '';
-                        const countdownSpans = element.querySelectorAll('span'); // Buscar spans dentro
-                        if (countdownSpans.length >= 4) {
-                            // Asumir que los primeros 4 spans son HH MM SS
-                            const parts = Array.from(countdownSpans).slice(0, 6); // Tomar los primeros 6 por si acaso
-                            countdownText = parts.map(span => span.textContent?.trim()).filter(Boolean).join(' ');
-                        } else {
-                            // Si no hay suficientes spans, intentar con el texto del elemento y sus hijos
-                            countdownText = element.textContent?.trim() || '';
-                        }
+                // Verificar si el texto del div contiene la etiqueta buscada
+                if (divText && divText.includes(labelText)) {
+                    console.log(`${getCurrentTimestamp()} ℹ️ Posible contenedor de conteo encontrado. Texto: ${divText.substring(0, 100)}...`);
 
-                        // Limpiar el texto del temporizador (eliminar la etiqueta encontrada)
-                        if (countdownText) {
-                            // Eliminar la parte de la etiqueta del texto final
-                            for (const label of possibleLabels) {
-                                countdownText = countdownText.replace(new RegExp(label, 'gi'), '').trim();
+                    // Ahora, dentro de este div, buscar el elemento que contiene el temporizador.
+                    // El temporizador está en un elemento hermano o hijo que contiene los spans.
+
+                    // Estrategia: Buscar todos los elementos hijos o descendientes que puedan contener el tiempo
+                    // y verificar si tienen la estructura de spans.
+                    const potentialContainers = divElement.querySelectorAll('*'); // Todos los descendientes
+
+                    for (let container of potentialContainers) {
+                        const spans = container.querySelectorAll('span');
+                        // console.log(`Revisando contenedor con ${spans.length} spans`); // Para debugging
+
+                        // Un temporizador típico tiene al menos 4 spans: HH, hours, MM, min (y posiblemente SS, sec)
+                        if (spans.length >= 4) {
+                            // Intentar construir el texto del temporizador
+                            let timeParts = [];
+                            let isValidTimeStructure = true;
+
+                            for (let i = 0; i < Math.min(spans.length, 6); i++) { // Limitar a 6 partes por si acaso
+                                const spanText = spans[i].textContent?.trim();
+                                if (spanText) {
+                                    timeParts.push(spanText);
+                                } else {
+                                    // Si un span está vacío, puede no ser el contenedor correcto
+                                    isValidTimeStructure = false;
+                                    break;
+                                }
                             }
-                            // Limpiar espacios extras
-                            countdownText = countdownText.replace(/\s+/g, ' ');
 
-                            if (countdownText) {
-                                return {
-                                    text: countdownText,
-                                    element: element.outerHTML // Devolver HTML del elemento para debugging si es necesario
-                                };
+                            if (isValidTimeStructure && timeParts.length >= 4) {
+                                const countdownText = timeParts.join(' ');
+                                console.log(`${getCurrentTimestamp()} ℹ️ Posible texto de temporizador extraído: ${countdownText}`);
+
+                                // Validación básica: debe contener 'hours' y 'min'
+                                if (countdownText.toLowerCase().includes('hours') && countdownText.toLowerCase().includes('min')) {
+                                    console.log(`${getCurrentTimestamp()} ✅ Conteo regresivo encontrado y validado.`);
+                                    return {
+                                        text: countdownText,
+                                        elementHtml: divElement.outerHTML.substring(0, 200) // Para debugging
+                                    };
+                                }
                             }
                         }
-                        
-                        // Si no se pudo extraer, devolver el texto del elemento encontrado
-                        return {
-                            text: element.textContent?.trim() || '',
-                            element: element.outerHTML
-                        };
                     }
+
+                    // Si no se encontró la estructura de spans, intentar con el texto del div directamente
+                    // (menos preciso, pero puede servir como fallback)
+                    // Esta parte es más compleja y propensa a errores, mejor omitirla por ahora
+                    // y enfocarse en la estructura de spans.
                 }
             }
-            return null; // No se encontró
+
+            // Si llegamos aquí, no se encontró el conteo regresivo con la estrategia principal
+            console.log(`${getCurrentTimestamp()} ℹ️ No se encontró el contenedor principal del conteo regresivo con la estrategia de búsqueda de spans.`);
+            return null;
         });
 
         if (countdownInfo && countdownInfo.text) {
             console.log(`${getCurrentTimestamp()} ✅ Conteo regresivo encontrado por texto: ${countdownInfo.text}`);
-            console.log(`${getCurrentTimestamp()} ℹ️ Fragmento HTML donde se encontró: ${countdownInfo.element.substring(0, 200)}...`); // Mostrar solo parte del HTML
-            
+            // console.log(`${getCurrentTimestamp()} ℹ️ Fragmento HTML donde se encontró: ${countdownInfo.elementHtml}...`); // Opcional para debugging
+
             // Parsear el tiempo y calcular espera
             const timeObj = parseCountdownText(countdownInfo.text);
             const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
@@ -258,7 +268,7 @@ async function findAndExtractCountdownByText() {
 
             return { found: true, waitTimeMs };
         } else {
-            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró texto relacionado con conteo regresivo en la página.`);
+            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró texto relacionado con conteo regresivo en la página usando la estrategia refinada.`);
         }
     } catch (e) {
         console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar conteo regresivo por texto: ${e.message}`);
@@ -402,13 +412,13 @@ async function runCycle() {
 
     // *** Nueva estrategia: Buscar conteo regresivo por texto en toda la página ***
     const countdownResult = await findAndExtractCountdownByText();
-    
+
     if (countdownResult.found) {
         // Si se encontró el conteo regresivo, programar el próximo ciclo y salir
         setTimeout(runCycle, countdownResult.waitTimeMs);
         return; // Salir de la función para no continuar con la búsqueda del botón
-    } 
-    
+    }
+
     // Si no se encontró conteo regresivo, verificar si hay botón de reclamar
     console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar...`);
 
