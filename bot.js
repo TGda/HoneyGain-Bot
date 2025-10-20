@@ -19,7 +19,8 @@ function getCurrentTimestamp() {
 // Función para extraer segundos del texto del temporizador
 function parseCountdownText(countdownText) {
   // Ejemplo: "06 hours 23 min 28 sec" -> { hours: 6, minutes: 23, seconds: 28 }
-  const regex = /(\d+) hours (\d+) min (\d+) sec/;
+  // También puede ser "21 hours 15 min 42 sec"
+  const regex = /(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/;
   const match = countdownText.match(regex);
 
   if (match && match.length === 4) {
@@ -138,7 +139,7 @@ async function extractBalanceFromContainer(containerElement) {
     try {
         // 1. Obtener todo el texto del contenedor
         const fullText = await page.evaluate(element => element.textContent, containerElement);
-        console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
+        //console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
 
         // 2. Buscar la posición de "Current balance"
         const balanceLabelIndex = fullText.toLowerCase().indexOf('current balance');
@@ -149,7 +150,7 @@ async function extractBalanceFromContainer(containerElement) {
 
         // 3. Extraer el texto que viene después de "Current balance"
         const textAfterLabel = fullText.substring(balanceLabelIndex + 'current balance'.length).trim();
-        console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
+        //console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
 
         // 4. Buscar un patrón numérico que coincida con formatos comunes de balance en ese fragmento
         //    Busca dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
@@ -175,6 +176,96 @@ async function extractBalanceFromContainer(containerElement) {
     }
     return null;
 }
+
+// Función para encontrar y extraer el conteo regresivo buscando texto en toda la página
+async function findAndExtractCountdownByText() {
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página...`);
+    try {
+        // Evaluar en toda la página buscando un elemento que contenga texto relacionado con el conteo
+        const countdownInfo = await page.evaluate(() => {
+            // Lista de textos posibles que pueden preceder al temporizador
+            const possibleLabels = [
+                'next pot available in',
+                'time left to collect'
+            ];
+
+            // Buscar todos los elementos que puedan contener texto
+            const allElements = document.querySelectorAll('div, span, p, h1, h2, h3, h4, h5, h6');
+
+            for (let element of allElements) {
+                const elementText = element.textContent?.toLowerCase();
+                if (!elementText) continue;
+
+                // Verificar si el texto del elemento contiene alguna de las etiquetas
+                for (const label of possibleLabels) {
+                    if (elementText.includes(label)) {
+                        // Encontramos un elemento con el texto buscado
+                        // Ahora intentamos extraer el temporizador asociado
+                        // Este podría estar en el mismo elemento o en elementos hermanos/descendientes cercanos
+                        
+                        // Estrategia 1: Buscar dentro del mismo elemento o sus hijos inmediatos
+                        let countdownText = '';
+                        const countdownSpans = element.querySelectorAll('span'); // Buscar spans dentro
+                        if (countdownSpans.length >= 4) {
+                            // Asumir que los primeros 4 spans son HH MM SS
+                            const parts = Array.from(countdownSpans).slice(0, 6); // Tomar los primeros 6 por si acaso
+                            countdownText = parts.map(span => span.textContent?.trim()).filter(Boolean).join(' ');
+                        } else {
+                            // Si no hay suficientes spans, intentar con el texto del elemento y sus hijos
+                            countdownText = element.textContent?.trim() || '';
+                        }
+
+                        // Limpiar el texto del temporizador (eliminar la etiqueta encontrada)
+                        if (countdownText) {
+                            // Eliminar la parte de la etiqueta del texto final
+                            for (const label of possibleLabels) {
+                                countdownText = countdownText.replace(new RegExp(label, 'gi'), '').trim();
+                            }
+                            // Limpiar espacios extras
+                            countdownText = countdownText.replace(/\s+/g, ' ');
+
+                            if (countdownText) {
+                                return {
+                                    text: countdownText,
+                                    element: element.outerHTML // Devolver HTML del elemento para debugging si es necesario
+                                };
+                            }
+                        }
+                        
+                        // Si no se pudo extraer, devolver el texto del elemento encontrado
+                        return {
+                            text: element.textContent?.trim() || '',
+                            element: element.outerHTML
+                        };
+                    }
+                }
+            }
+            return null; // No se encontró
+        });
+
+        if (countdownInfo && countdownInfo.text) {
+            console.log(`${getCurrentTimestamp()} ✅ Conteo regresivo encontrado por texto: ${countdownInfo.text}`);
+            console.log(`${getCurrentTimestamp()} ℹ️ Fragmento HTML donde se encontró: ${countdownInfo.element.substring(0, 200)}...`); // Mostrar solo parte del HTML
+            
+            // Parsear el tiempo y calcular espera
+            const timeObj = parseCountdownText(countdownInfo.text);
+            const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+
+            // Programar el próximo ciclo
+            const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
+            const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+            console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+
+            return { found: true, waitTimeMs };
+        } else {
+            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró texto relacionado con conteo regresivo en la página.`);
+        }
+    } catch (e) {
+        console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar conteo regresivo por texto: ${e.message}`);
+    }
+    return { found: false };
+}
+
 
 // Función principal del ciclo
 async function runCycle() {
@@ -309,125 +400,97 @@ async function runCycle() {
     // Esperar un poco para que se cargue el contenido del botón/conteo
     await page.waitForTimeout(3000);
 
+    // *** Nueva estrategia: Buscar conteo regresivo por texto en toda la página ***
+    const countdownResult = await findAndExtractCountdownByText();
+    
+    if (countdownResult.found) {
+        // Si se encontró el conteo regresivo, programar el próximo ciclo y salir
+        setTimeout(runCycle, countdownResult.waitTimeMs);
+        return; // Salir de la función para no continuar con la búsqueda del botón
+    } 
+    
+    // Si no se encontró conteo regresivo, verificar si hay botón de reclamar
+    console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar...`);
+
     // Definir la base del selector para el contenedor del conteo/botón
     const potBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
     const possiblePotNths = [1, 2, 3, 4, 5]; // Rango de valores a probar para el conteo/botón
 
-    // Intentar encontrar el conteo regresivo
-    // Buscar un elemento que contenga "Next pot available in"
-    let countdownFound = false;
     let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'conteo/botón');
     if (potContainerSelector) {
         try {
-          // Buscar un elemento descendiente que contenga el texto del conteo
-          // Asumiendo que el conteo regresivo está en un div hijo
-          const countdownElement = await page.$(`${potContainerSelector} div`);
-          if (countdownElement) {
-            const countdownText = await page.evaluate(element => element.textContent, countdownElement);
-            if (countdownText && countdownText.toLowerCase().includes("next pot available in")) {
-                // Extraer solo la parte del tiempo (eliminar "Next pot available in")
-                const timePart = countdownText.replace(/Next pot available in/i, '').trim();
-                console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado: ${timePart}`);
+          // El botón de reclamar debería estar dentro del mismo contenedor general
+          // Buscar el botón directamente dentro del contenedor
+          const claimButton = await page.$(`${potContainerSelector} button`);
+          if (claimButton) {
+              // Verificar el texto del botón para asegurarnos
+              const buttonText = await page.evaluate(el => el.textContent, claimButton);
+              console.log(`${getCurrentTimestamp()} ✅ Botón de reclamar encontrado (en contenedor encontrado). Texto del botón: "${buttonText}". Haciendo clic para reclamar el premio...`);
 
-                // Parsear el tiempo y calcular espera
-                const timeObj = parseCountdownText(timePart);
-                const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+              // Hacer clic en el botón de reclamar
+              await page.click(`${potContainerSelector} button`);
 
-                // Programar el próximo ciclo
-                const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
-                const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-                console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+              // Esperar un momento después de reclamar
+              console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
+              await page.waitForTimeout(5000);
 
-                // Esperar el tiempo calculado antes de repetir
-                setTimeout(runCycle, waitTimeMs);
-                countdownFound = true;
-            }
-          }
-        } catch (e) {
-          console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar conteo regresivo en contenedor encontrado: ${e.message}`);
-        }
-    }
+              // Refrescar la página para obtener el balance actualizado
+              console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
+              await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+              await page.waitForTimeout(5000);
 
-    if (!countdownFound) {
-        // Si no hay conteo regresivo, verificar si hay botón de reclamar
-        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar en contenedor encontrado...`);
+              // Verificar el nuevo balance
+              console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo balance...`);
+              // Reutilizar la lógica de búsqueda de balance actualizada
+              let newBalance = "0";
+              let newBalanceFound = false;
 
-        if (potContainerSelector) {
-            try {
-              // *** Cambio clave aquí ***
-              // En lugar de usar un selector interno muy específico, buscamos el botón directamente
-              // dentro del contenedor ya encontrado.
-              const claimButton = await page.$(`${potContainerSelector} button`);
-              if (claimButton) {
-                  // Verificar el texto del botón para asegurarnos
-                  const buttonText = await page.evaluate(el => el.textContent, claimButton);
-                  console.log(`${getCurrentTimestamp()} ✅ Botón de reclamar encontrado (en contenedor encontrado). Texto del botón: "${buttonText}". Haciendo clic para reclamar el premio...`);
-
-                  // Hacer clic en el botón de reclamar
-                  await page.click(`${potContainerSelector} button`);
-
-                  // Esperar un momento después de reclamar
-                  console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
-                  await page.waitForTimeout(5000);
-
-                  // Refrescar la página para obtener el balance actualizado
-                  console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
-                  await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-                  await page.waitForTimeout(5000);
-
-                  // Verificar el nuevo balance
-                  console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo balance...`);
-                  // Reutilizar la lógica de búsqueda de balance actualizada
-                  let newBalance = "0";
-                  let newBalanceFound = false;
-
-                  // Usar la función para encontrar el contenedor del balance (nuevamente después del refresh)
-                  const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
-                  if (newBalanceContainerSelector) {
-                      try {
-                        const newBalanceContainer = await page.$(newBalanceContainerSelector);
-                        // Usar la nueva función para extraer el balance del contenedor
-                        const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
-                        if (extractedNewBalance) {
-                            newBalance = extractedNewBalance;
-                            newBalanceFound = true;
-                            console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
-                        } else {
-                            console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance.`);
-                        }
-                      } catch (e) {
-                        console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado: ${e.message}`);
-                      }
+              // Usar la función para encontrar el contenedor del balance (nuevamente después del refresh)
+              const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
+              if (newBalanceContainerSelector) {
+                  try {
+                    const newBalanceContainer = await page.$(newBalanceContainerSelector);
+                    // Usar la nueva función para extraer el balance del contenedor
+                    const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
+                    if (extractedNewBalance) {
+                        newBalance = extractedNewBalance;
+                        newBalanceFound = true;
+                        console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
+                    } else {
+                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance.`);
+                    }
+                  } catch (e) {
+                    console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado: ${e.message}`);
                   }
-
-                  if (!newBalanceFound) {
-                    throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
-                  }
-
-                  if (newBalance !== balance) {
-                    console.log(`${getCurrentTimestamp()} 🎉 Balance: ${balance} → ${newBalance}`);
-                  } else {
-                    console.log(`${getCurrentTimestamp()} ℹ️ Balance: ${balance} (sin cambios)`);
-                  }
-
-                  // Esperar 5 minutos antes del próximo intento
-                  console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
-                  setTimeout(runCycle, 300000); // 5 minutos
-
-              } else {
-                  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un botón (<button>) dentro del contenedor encontrado.`);
-                  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
-                  setTimeout(runCycle, 300000); // 5 minutos
               }
-            } catch (claimButtonError) {
-              console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar botón de reclamar en contenedor encontrado: ${claimButtonError.message}`);
+
+              if (!newBalanceFound) {
+                throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
+              }
+
+              if (newBalance !== balance) {
+                console.log(`${getCurrentTimestamp()} 🎉 Balance: ${balance} → ${newBalance}`);
+              } else {
+                console.log(`${getCurrentTimestamp()} ℹ️ Balance: ${balance} (sin cambios)`);
+              }
+
+              // Esperar 5 minutos antes del próximo intento
+              console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
+              setTimeout(runCycle, 300000); // 5 minutos
+
+          } else {
+              console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un botón (<button>) dentro del contenedor encontrado.`);
               console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
               setTimeout(runCycle, 300000); // 5 minutos
-            }
-        } else {
-            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró contenedor para conteo ni botón. Reintentando en 5 minutos...`);
-            setTimeout(runCycle, 300000); // 5 minutos
+          }
+        } catch (claimButtonError) {
+          console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar botón de reclamar en contenedor encontrado: ${claimButtonError.message}`);
+          console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
+          setTimeout(runCycle, 300000); // 5 minutos
         }
+    } else {
+        console.log(`${getCurrentTimestamp()} ⚠️ No se encontró contenedor para conteo ni botón. Reintentando en 5 minutos...`);
+        setTimeout(runCycle, 300000); // 5 minutos
     }
 
   } catch (err) {
