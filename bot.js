@@ -1,5 +1,6 @@
 // bot.js
 const puppeteer = require("puppeteer");
+const http = require("http"); // Para enviar notificaciones HTTP/HTTPS
 
 // Función para obtener la fecha y hora actual formateada [DDMMMYY HH:MM:SS]
 function getCurrentTimestamp() {
@@ -59,6 +60,65 @@ function getFutureTime(milliseconds) {
   return { dateStr, timeStr };
 }
 
+// Función para enviar una notificación POST condicional
+async function sendNotification(message) { // 'message' se mantiene por si se desea en el futuro
+    const notificationUrl = process.env.NOTIFICATION;
+    
+    // Solo enviar si la variable NOTIFICATION está definida y no está vacía
+    if (!notificationUrl) {
+        console.log(`${getCurrentTimestamp()} ℹ️ Variable NOTIFICATION no definida. Omitiendo notificación.`);
+        return;
+    }
+
+    console.log(`${getCurrentTimestamp()} 📢 Enviando notificación a: ${notificationUrl}`);
+    
+    return new Promise((resolve) => {
+        const postData = ''; // Sin datos en el cuerpo del POST
+        
+        // Usar 'new URL()' para parsear correctamente el protocolo (http o https), hostname, puerto y path
+        let url;
+        try {
+           url = new URL(notificationUrl);
+        } catch (err) {
+            console.error(`${getCurrentTimestamp()} ⚠️ Error al parsear la URL de notificación '${notificationUrl}': ${err.message}. Omitiendo notificación.`);
+            resolve(); // Resolver para no romper el flujo principal
+            return;
+        }
+        
+        // Determinar si usar 'http' o 'https' basado en el protocolo de la URL
+        const isHttps = url.protocol === 'https:';
+        const httpModule = isHttps ? require('https') : require('http');
+
+        const options = {
+            hostname: url.hostname,
+            port: url.port || (isHttps ? 443 : 80), // Puerto por defecto si no se especifica
+            path: url.pathname + url.search, // Incluye ruta y parámetros de consulta
+            method: 'POST',
+            headers: {
+                // 'Content-Type': 'application/json', // Opcional: Puedes eliminarlo si no es requerido por el endpoint
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        // Crear la solicitud usando el módulo apropiado (http o https)
+        const req = httpModule.request(options, (res) => {
+            console.log(`${getCurrentTimestamp()} ✅ Notificación enviada. Código de estado: ${res.statusCode}`);
+            resolve(); // Resolvemos la promesa independientemente del código de estado
+        });
+
+        req.on('error', (e) => {
+            console.error(`${getCurrentTimestamp()} ⚠️ Error al enviar notificación a '${notificationUrl}': ${e.message}`);
+            // No resolvemos con error para no romper el flujo principal
+            resolve(); 
+        });
+
+        // Escribir datos al cuerpo de la solicitud (vacío en este caso)
+        req.write(postData);
+        req.end();
+    });
+}
+
+
 let browser;
 let page;
 let isFirstRun = true;
@@ -79,6 +139,7 @@ async function login() {
       await page.type("#password", password, { delay: 50 });
 
       console.log(`${getCurrentTimestamp()} 🔑 Enviando login...`);
+      // Corregido: Selector del botón de login
       await page.click(".sc-kLhKbu.dEXYZj.hg-login-with-email");
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 });
       return true;
@@ -293,6 +354,11 @@ async function findAndExtractCountdownByText() {
                             }
                         }
                     }
+
+                    // Si no se encontró la estructura de spans, intentar con el texto del div directamente
+                    // (menos preciso, pero puede servir como fallback)
+                    // Esta parte es más compleja y propensa a errores, mejor omitirla por ahora
+                    // y enfocarse en la estructura de spans.
                 }
             }
 
@@ -323,6 +389,7 @@ async function findAndExtractCountdownByText() {
     }
     return { found: false };
 }
+
 
 // Función principal del ciclo
 async function runCycle() {
@@ -355,6 +422,7 @@ async function runCycle() {
       page = await browser.newPage();
 
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
+      // Corregido: Eliminado espacio extra en la URL
       const response = await page.goto("https://dashboard.honeygain.com/login", {
         waitUntil: "networkidle2",
         timeout: 60000,
@@ -414,17 +482,16 @@ async function runCycle() {
       await page.waitForTimeout(5000); // Esperar un poco más después de refrescar
     }
 
-    // Obtener balance actual
-    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance actual...`);
-    // Esperar un poco más para que el contenido dinámico se cargue
-    await page.waitForTimeout(5000);
+    // --- LÓGICA MEJORADA: Verificar balance antes de reclamar ---
+    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
+    await page.waitForTimeout(5000); // Esperar a que el contenido dinámico se cargue
 
     // Definir la base del selector para el contenedor del balance
     const balanceBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div';
     const possibleBalanceNths = [1, 2, 3, 4, 5]; // Rango de valores a probar para el balance
 
-    let balance = "0";
-    let balanceFound = false;
+    let balanceBefore = "0";
+    let balanceBeforeFound = false;
 
     // Usar la función para encontrar el contenedor del balance
     const balanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
@@ -434,22 +501,20 @@ async function runCycle() {
           // Usar la nueva función para extraer el balance del contenedor
           const extractedBalance = await extractBalanceFromContainer(balanceContainer);
           if (extractedBalance) {
-              balance = extractedBalance;
-              balanceFound = true;
-              console.log(`${getCurrentTimestamp()} ✅ Balance encontrado: ${balance}`);
+              balanceBefore = extractedBalance;
+              balanceBeforeFound = true;
+              console.log(`${getCurrentTimestamp()} ✅ Balance ANTES encontrado: ${balanceBefore}`);
           } else {
-              console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor encontrado.`);
+              console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor encontrado (ANTES).`);
           }
         } catch (e) {
-          console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer balance del contenedor encontrado: ${e.message}`);
+          console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer balance del contenedor encontrado (ANTES): ${e.message}`);
         }
     }
 
-    if (!balanceFound) {
-      throw new Error("No se pudo encontrar el elemento del balance después de múltiples intentos.");
+    if (!balanceBeforeFound) {
+      throw new Error("No se pudo encontrar el elemento del balance ANTES de reclamar después de múltiples intentos.");
     }
-
-    console.log(`${getCurrentTimestamp()} 💰 Balance: ${balance}`);
 
     // Verificar si aparece el conteo regresivo o el botón de reclamar
     console.log(`${getCurrentTimestamp()} 🔍 Verificando si hay conteo regresivo o botón de reclamar...`);
@@ -497,16 +562,17 @@ async function runCycle() {
               console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
               await page.waitForTimeout(5000);
 
+              // --- LÓGICA MEJORADA: Verificar balance DESPUÉS de reclamar ---
               // Refrescar la página para obtener el balance actualizado
-              console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
+              console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
               await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
               await page.waitForTimeout(5000);
+              
+              console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
+              await page.waitForTimeout(5000); // Esperar a que el contenido dinámico se cargue
 
-              // Verificar el nuevo balance
-              console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo balance...`);
-              // Reutilizar la lógica de búsqueda de balance actualizada
-              let newBalance = "0";
-              let newBalanceFound = false;
+              let balanceAfter = "0";
+              let balanceAfterFound = false;
 
               // Usar la función para encontrar el contenedor del balance (nuevamente después del refresh)
               const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
@@ -516,27 +582,32 @@ async function runCycle() {
                     // Usar la nueva función para extraer el balance del contenedor
                     const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
                     if (extractedNewBalance) {
-                        newBalance = extractedNewBalance;
-                        newBalanceFound = true;
-                        console.log(`${getCurrentTimestamp()} ✅ Nuevo balance encontrado: ${newBalance}`);
+                        balanceAfter = extractedNewBalance;
+                        balanceAfterFound = true;
+                        console.log(`${getCurrentTimestamp()} ✅ Balance DESPUÉS encontrado: ${balanceAfter}`);
                     } else {
-                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance.`);
+                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance (DESPUÉS).`);
                     }
                   } catch (e) {
-                    console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado: ${e.message}`);
+                    console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado (DESPUÉS): ${e.message}`);
                   }
               }
 
-              if (!newBalanceFound) {
-                throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
+              if (!balanceAfterFound) {
+                throw new Error("No se pudo encontrar el elemento del balance DESPUÉS de reclamar después de múltiples intentos.");
               }
 
-              if (newBalance !== balance) {
-                console.log(`${getCurrentTimestamp()} 🎉 Balance: ${balance} → ${newBalance}`);
+              const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
+              
+              if (balanceIncreased) {
+                  console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
+                  // Enviar notificación de éxito
+                  await sendNotification("Premio Honeygain reclamado con aumento de balance");
               } else {
-                console.log(`${getCurrentTimestamp()} ℹ️ Balance: ${balance} (sin cambios)`);
+                  console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar. Puede que el premio haya sido $0 o haya un retraso en la actualización.`);
+                  // NO se envía notificación si el balance no aumenta
               }
-
+              
               // Esperar 5 minutos antes del próximo intento
               console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
               setTimeout(runCycle, 300000); // 5 minutos
