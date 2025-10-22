@@ -1,6 +1,7 @@
 // bot.js
 const puppeteer = require("puppeteer");
 const http = require("http"); // Para enviar notificaciones HTTP/HTTPS
+const https = require("https"); // Para enviar notificaciones HTTPS
 
 // Función para obtener la fecha y hora actual formateada [DDMMMYY HH:MM:SS]
 function getCurrentTimestamp() {
@@ -87,7 +88,7 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
         
         // Determinar si usar 'http' o 'https' basado en el protocolo de la URL
         const isHttps = url.protocol === 'https:';
-        const httpModule = isHttps ? require('https') : require('http');
+        const httpModule = isHttps ? https : http; // Usar módulos específicos
 
         const options = {
             hostname: url.hostname,
@@ -354,11 +355,6 @@ async function findAndExtractCountdownByText() {
                             }
                         }
                     }
-
-                    // Si no se encontró la estructura de spans, intentar con el texto del div directamente
-                    // (menos preciso, pero puede servir como fallback)
-                    // Esta parte es más compleja y propensa a errores, mejor omitirla por ahora
-                    // y enfocarse en la estructura de spans.
                 }
             }
 
@@ -389,7 +385,6 @@ async function findAndExtractCountdownByText() {
     }
     return { found: false };
 }
-
 
 // Función principal del ciclo
 async function runCycle() {
@@ -482,9 +477,10 @@ async function runCycle() {
       await page.waitForTimeout(5000); // Esperar un poco más después de refrescar
     }
 
-    // --- LÓGICA MEJORADA: Verificar balance antes de reclamar ---
+    // --- LÓGICA MEJORADA: Verificar balance ANTES de cualquier acción ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
-    await page.waitForTimeout(5000); // Esperar a que el contenido dinámico se cargue
+    // Esperar un poco más para que el contenido dinámico se cargue
+    await page.waitForTimeout(5000);
 
     // Definir la base del selector para el contenedor del balance
     const balanceBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div';
@@ -594,7 +590,7 @@ async function runCycle() {
               }
 
               if (!balanceAfterFound) {
-                throw new Error("No se pudo encontrar el elemento del balance DESPUÉS de reclamar después de múltiples intentos.");
+                throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
               }
 
               const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
