@@ -19,6 +19,7 @@ services:
       - EMAIL=${EMAIL} # <-- Mapea la variable
       - PASSWORD=${PASSWORD} # <-- Mapea la variable
       - TZ=${TZ:-UTC} # <-- Opcional
+      - NOTIFICATION=${NOTIFICATION} # <-- Opcional para enviar un webhook de que se logro collectar
     dns:
       - 1.1.1.1
       - 8.8.8.8
