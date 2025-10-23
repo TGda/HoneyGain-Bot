@@ -44,16 +44,14 @@ function timeToMilliseconds(timeObj) {
 }
 
 // Función para calcular la hora futura
-function getFutureDateTime(milliseconds) {
+function getFutureTime(milliseconds) {
   const now = new Date();
   const future = new Date(now.getTime() + milliseconds);
-  // Formatear la fecha como "DD MMM YYYY"
   const dateStr = future.toLocaleDateString('es-ES', {
     day: '2-digit',
     month: 'short',
     year: 'numeric'
   });
-  // Formatear la hora como "HH:MM:SS"
   const timeStr = future.toLocaleTimeString('es-ES', {
     hour12: false,
     hour: '2-digit',
@@ -66,7 +64,7 @@ function getFutureDateTime(milliseconds) {
 // Función para enviar una notificación POST condicional
 async function sendNotification(message) { // 'message' se mantiene por si se desea en el futuro
     const notificationUrl = process.env.NOTIFICATION;
-
+    
     // Solo enviar si la variable NOTIFICATION está definida y no está vacía
     if (!notificationUrl) {
         console.log(`${getCurrentTimestamp()} ℹ️ Variable NOTIFICATION no definida. Omitiendo notificación.`);
@@ -74,10 +72,10 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
     }
 
     console.log(`${getCurrentTimestamp()} 📢 Enviando notificación a: ${notificationUrl}`);
-
+    
     return new Promise((resolve) => {
         const postData = ''; // Sin datos en el cuerpo del POST
-
+        
         // Usar 'new URL()' para parsear correctamente el protocolo (http o https), hostname, puerto y path
         let url;
         try {
@@ -87,7 +85,7 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
             resolve(); // Resolver para no romper el flujo principal
             return;
         }
-
+        
         // Determinar si usar 'http' o 'https' basado en el protocolo de la URL
         const isHttps = url.protocol === 'https:';
         const httpModule = isHttps ? https : http; // Usar módulos específicos
@@ -112,7 +110,7 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
         req.on('error', (e) => {
             console.error(`${getCurrentTimestamp()} ⚠️ Error al enviar notificación a '${notificationUrl}': ${e.message}`);
             // No resolvemos con error para no romper el flujo principal
-            resolve();
+            resolve(); 
         });
 
         // Escribir datos al cuerpo de la solicitud (vacío en este caso)
@@ -120,6 +118,7 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
         req.end();
     });
 }
+
 
 let browser;
 let page;
@@ -141,6 +140,7 @@ async function login() {
       await page.type("#password", password, { delay: 50 });
 
       console.log(`${getCurrentTimestamp()} 🔑 Enviando login...`);
+      // Corregido: Selector del botón de login
       await page.click(".sc-kLhKbu.dEXYZj.hg-login-with-email");
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 });
       return true;
@@ -246,28 +246,23 @@ async function findAndExtractCountdownBySelector() {
         // Selector basado en el elemento HTML proporcionado
         // Selecciona el div contenedor principal con las clases específicas
         const countdownContainerSelector = 'div.sc-duWCru.dPYLJV';
-
+        
         // Esperar a que el contenedor esté presente
         await page.waitForSelector(countdownContainerSelector, { timeout: 5000 });
         console.log(`${getCurrentTimestamp()} ✅ Contenedor del conteo regresivo encontrado por selector.`);
 
-        // Verificar si contiene el texto "Time left to collect" O "Next pot available in"
+        // Verificar si contiene el texto "Time left to collect"
         const container = await page.$(countdownContainerSelector);
         const containerText = await page.evaluate(el => el.textContent, container);
-
-        // Buscar ambas opciones de texto
-        const timeLeftToCollectFound = containerText && containerText.includes("Time left to collect");
-        const nextPotAvailableInFound = containerText && containerText.includes("Next pot available in");
-
-        if (timeLeftToCollectFound || nextPotAvailableInFound) {
-            const foundText = timeLeftToCollectFound ? "Time left to collect" : "Next pot available in";
-            console.log(`${getCurrentTimestamp()} ✅ Texto '${foundText}' encontrado en el contenedor.`);
-
+        
+        if (containerText && containerText.includes("Time left to collect")) {
+            console.log(`${getCurrentTimestamp()} ✅ Texto 'Time left to collect' encontrado en el contenedor.`);
+            
             // Buscar el elemento <p> que contiene el temporizador
             // Este es el segundo <p> dentro del contenedor, o el que tiene la clase específica
             const timeParagraphSelector = `${countdownContainerSelector} > p.sc-etPtWW.hRiIai`;
             await page.waitForSelector(timeParagraphSelector, { timeout: 2000 }); // Corto timeout ya que el contenedor existe
-
+            
             // Extraer el texto del temporizador del párrafo
             const timeText = await page.$eval(timeParagraphSelector, el => el.textContent);
             console.log(`${getCurrentTimestamp()} ✅ Texto del temporizador extraído: ${timeText}`);
@@ -278,7 +273,7 @@ async function findAndExtractCountdownBySelector() {
                 const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
 
                 // Programar el próximo ciclo
-                const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
+                const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
                 const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
                 console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
 
@@ -287,12 +282,12 @@ async function findAndExtractCountdownBySelector() {
                 console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer el texto del temporizador del párrafo encontrado.`);
             }
         } else {
-             console.log(`${getCurrentTimestamp()} ⚠️ El contenedor encontrado no contiene ninguno de los textos esperados ('Time left to collect' o 'Next pot available in').`);
+             console.log(`${getCurrentTimestamp()} ⚠️ El contenedor encontrado no contiene el texto 'Time left to collect'.`);
         }
     } catch (e) {
         console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo por selector CSS: ${e.message}`);
     }
-
+    
     console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo usando el selector CSS principal.`);
     return { found: false };
 }
@@ -302,10 +297,9 @@ async function findAndExtractCountdownByText() {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página (fallback)...`);
     try {
         // Evaluar en toda la página buscando un elemento que contenga EXACTAMENTE el texto esperado
-        // CORREGIDO: No usar getCurrentTimestamp dentro de page.evaluate
         const countdownInfo = await page.evaluate(() => {
-            // Textos exactos que identifican el conteo regresivo
-            const labelTimes = ["time left to collect", "next pot available in"];
+            // Texto exacto que identifica el conteo regresivo
+            const labelText = "time left to collect";
 
             // Buscar todos los divs, ya que el contenedor principal suele ser un div
             const divElements = document.querySelectorAll('div');
@@ -314,51 +308,49 @@ async function findAndExtractCountdownByText() {
                 const divText = divElement.textContent?.toLowerCase().trim();
                 // console.log(`Revisando div: ${divText.substring(0, 50)}...`); // Para debugging
 
-                // Verificar si el texto del div contiene alguna de las etiquetas buscadas
-                for (const labelTime of labelTimes) {
-                    if (divText && divText.includes(labelTime)) {
-                        console.log(`[${new Date().toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}] ℹ️ Posible contenedor de conteo encontrado. Texto: ${divText.substring(0, 100)}...`);
+                // Verificar si el texto del div contiene la etiqueta buscada
+                if (divText && divText.includes(labelText)) {
+                    console.log(`${getCurrentTimestamp()} ℹ️ Posible contenedor de conteo encontrado. Texto: ${divText.substring(0, 100)}...`);
 
-                        // Ahora, dentro de este div, buscar el elemento que contiene el temporizador.
-                        // El temporizador está en un elemento hermano o hijo que contiene los spans.
+                    // Ahora, dentro de este div, buscar el elemento que contiene el temporizador.
+                    // El temporizador está en un elemento hermano o hijo que contiene los spans.
 
-                        // Estrategia: Buscar todos los elementos hijos o descendientes que puedan contener el tiempo
-                        // y verificar si tienen la estructura de spans.
-                        const potentialContainers = divElement.querySelectorAll('*'); // Todos los descendientes
+                    // Estrategia: Buscar todos los elementos hijos o descendientes que puedan contener el tiempo
+                    // y verificar si tienen la estructura de spans.
+                    const potentialContainers = divElement.querySelectorAll('*'); // Todos los descendientes
 
-                        for (let container of potentialContainers) {
-                            const spans = container.querySelectorAll('span');
-                            // console.log(`Revisando contenedor con ${spans.length} spans`); // Para debugging
+                    for (let container of potentialContainers) {
+                        const spans = container.querySelectorAll('span');
+                        // console.log(`Revisando contenedor con ${spans.length} spans`); // Para debugging
 
-                            // Un temporizador típico tiene al menos 4 spans: HH, hours, MM, min (y posiblemente SS, sec)
-                            if (spans.length >= 4) {
-                                // Intentar construir el texto del temporizador
-                                let timeParts = [];
-                                let isValidTimeStructure = true;
+                        // Un temporizador típico tiene al menos 4 spans: HH, hours, MM, min (y posiblemente SS, sec)
+                        if (spans.length >= 4) {
+                            // Intentar construir el texto del temporizador
+                            let timeParts = [];
+                            let isValidTimeStructure = true;
 
-                                for (let i = 0; i < Math.min(spans.length, 6); i++) { // Limitar a 6 partes por si acaso
-                                    const spanText = spans[i].textContent?.trim();
-                                    if (spanText) {
-                                        timeParts.push(spanText);
-                                    } else {
-                                        // Si un span está vacío, puede no ser el contenedor correcto
-                                        isValidTimeStructure = false;
-                                        break;
-                                    }
+                            for (let i = 0; i < Math.min(spans.length, 6); i++) { // Limitar a 6 partes por si acaso
+                                const spanText = spans[i].textContent?.trim();
+                                if (spanText) {
+                                    timeParts.push(spanText);
+                                } else {
+                                    // Si un span está vacío, puede no ser el contenedor correcto
+                                    isValidTimeStructure = false;
+                                    break;
                                 }
+                            }
 
-                                if (isValidTimeStructure && timeParts.length >= 4) {
-                                    const countdownText = timeParts.join(' ');
-                                    console.log(`[${new Date().toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}] ℹ️ Posible texto de temporizador extraído: ${countdownText}`);
+                            if (isValidTimeStructure && timeParts.length >= 4) {
+                                const countdownText = timeParts.join(' ');
+                                console.log(`${getCurrentTimestamp()} ℹ️ Posible texto de temporizador extraído: ${countdownText}`);
 
-                                    // Validación básica: debe contener 'hours' y 'min'
-                                    if (countdownText.toLowerCase().includes('hours') && countdownText.toLowerCase().includes('min')) {
-                                        console.log(`[${new Date().toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}] ✅ Conteo regresivo encontrado y validado.`);
-                                        return {
-                                            text: countdownText,
-                                            elementHtml: divElement.outerHTML.substring(0, 200) // Para debugging
-                                        };
-                                    }
+                                // Validación básica: debe contener 'hours' y 'min'
+                                if (countdownText.toLowerCase().includes('hours') && countdownText.toLowerCase().includes('min')) {
+                                    console.log(`${getCurrentTimestamp()} ✅ Conteo regresivo encontrado y validado.`);
+                                    return {
+                                        text: countdownText,
+                                        elementHtml: divElement.outerHTML.substring(0, 200) // Para debugging
+                                    };
                                 }
                             }
                         }
@@ -367,7 +359,7 @@ async function findAndExtractCountdownByText() {
             }
 
             // Si llegamos aquí, no se encontró el conteo regresivo con la estrategia principal
-            console.log(`[${new Date().toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}] ℹ️ No se encontró el contenedor principal del conteo regresivo con la estrategia de búsqueda de spans.`);
+            console.log(`${getCurrentTimestamp()} ℹ️ No se encontró el contenedor principal del conteo regresivo con la estrategia de búsqueda de spans.`);
             return null;
         });
 
@@ -380,7 +372,7 @@ async function findAndExtractCountdownByText() {
             const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
 
             // Programar el próximo ciclo
-            const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
+            const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
             const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
             console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
 
@@ -398,9 +390,9 @@ async function findAndExtractCountdownByText() {
 async function runCycle() {
   try {
     if (isFirstRun) {
-      console.log(`${getCurrentTimestamp()} 🚀 Iniciando bot de PacketShare...`);
+      console.log(`${getCurrentTimestamp()} 🚀 Iniciando bot de Honeygain...`);
       browser = await puppeteer.launch({
-        headless: "new", // Usar el nuevo modo headless
+        headless: 'old', // Usar el modo headless antiguo
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -425,6 +417,7 @@ async function runCycle() {
       page = await browser.newPage();
 
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
+      // Corregido: Eliminado espacio extra en la URL
       const response = await page.goto("https://dashboard.honeygain.com/login  ", {
         waitUntil: "networkidle2",
         timeout: 60000,
@@ -453,7 +446,6 @@ async function runCycle() {
       console.log(`${getCurrentTimestamp()} 🔍 Esperando campos de login...`);
       await page.waitForSelector('#email', { timeout: 15000 });
       await page.waitForSelector('#password', { timeout: 15000 });
-      await page.waitForSelector("div.btn.login", { timeout: 10000 });
 
       const email = process.env.EMAIL;
       const password = process.env.PASSWORD;
@@ -520,8 +512,6 @@ async function runCycle() {
       throw new Error("No se pudo encontrar el elemento del balance ANTES de reclamar después de múltiples intentos.");
     }
 
-    console.log(`${getCurrentTimestamp()} 💰 Balance ANTES: ${balanceBefore}`);
-
     // Verificar si aparece el conteo regresivo o el botón de reclamar
     console.log(`${getCurrentTimestamp()} 🔍 Verificando si hay conteo regresivo o botón de reclamar...`);
 
@@ -573,8 +563,7 @@ async function runCycle() {
               console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
               await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
               await page.waitForTimeout(5000);
-
-              // Verificar el nuevo balance
+              
               console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
               await page.waitForTimeout(5000); // Esperar a que el contenido dinámico se cargue
 
@@ -604,14 +593,12 @@ async function runCycle() {
                 throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
               }
 
-              console.log(`${getCurrentTimestamp()} 💰 Balance DESPUÉS: ${balanceAfter}`);
-
               const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
               
               if (balanceIncreased) {
                   console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
-                  // Enviar notificación de éxito SOLO SI EL BALANCE AUMENTÓ
-                  await sendNotification("Premio Packetshare reclamado con aumento de balance");
+                  // Enviar notificación de éxito
+                  await sendNotification("Premio Honeygain reclamado con aumento de balance");
               } else {
                   console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar. Puede que el premio haya sido $0 o haya un retraso en la actualización.`);
                   // NO se envía notificación si el balance no aumenta
@@ -620,7 +607,7 @@ async function runCycle() {
               // Esperar 5 minutos antes del próximo intento
               console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
               setTimeout(runCycle, 300000); // 5 minutos
-              
+
           } else {
               console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un botón (<button>) dentro del contenedor encontrado.`);
               console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
