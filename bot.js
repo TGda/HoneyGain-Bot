@@ -1,7 +1,6 @@
 // bot.js
 const puppeteer = require("puppeteer");
 const http = require("http"); // Para enviar notificaciones HTTP/HTTPS
-const https = require("https"); // Para enviar notificaciones HTTPS
 
 // Función para obtener la fecha y hora actual formateada [DDMMMYY HH:MM:SS]
 function getCurrentTimestamp() {
@@ -90,7 +89,7 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
 
         // Determinar si usar 'http' o 'https' basado en el protocolo de la URL
         const isHttps = url.protocol === 'https:';
-        const httpModule = isHttps ? https : http; // Usar módulos específicos
+        const httpModule = isHttps ? require('https') : require('http'); // Usar módulos específicos
 
         const options = {
             hostname: url.hostname,
@@ -302,7 +301,6 @@ async function findAndExtractCountdownByText() {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página (fallback)...`);
     try {
         // Evaluar en toda la página buscando un elemento que contenga EXACTAMENTE el texto esperado
-        // CORREGIDO: No usar getCurrentTimestamp dentro de page.evaluate
         const countdownInfo = await page.evaluate(() => {
             // Textos exactos que identifican el conteo regresivo
             const labelTimes = ["time left to collect", "next pot available in"];
@@ -314,7 +312,7 @@ async function findAndExtractCountdownByText() {
                 const divText = divElement.textContent?.toLowerCase().trim();
                 // console.log(`Revisando div: ${divText.substring(0, 50)}...`); // Para debugging
 
-                // Verificar si el texto del div contiene alguna de las etiquetas buscadas
+                // Verificar si el texto del div contiene alguna de las etiquetas
                 for (const labelTime of labelTimes) {
                     if (divText && divText.includes(labelTime)) {
                         console.log(`[${new Date().toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}] ℹ️ Posible contenedor de conteo encontrado. Texto: ${divText.substring(0, 100)}...`);
@@ -398,9 +396,9 @@ async function findAndExtractCountdownByText() {
 async function runCycle() {
   try {
     if (isFirstRun) {
-      console.log(`${getCurrentTimestamp()} 🚀 Iniciando bot de PacketShare...`);
+      console.log(`${getCurrentTimestamp()} 🚀 Iniciando bot de Honeygain...`);
       browser = await puppeteer.launch({
-        headless: "new", // Usar el nuevo modo headless
+        headless: 'old', // Usar el modo headless antiguo
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -429,7 +427,7 @@ async function runCycle() {
         waitUntil: "networkidle2",
         timeout: 60000,
       });
-      console.log(`${getCurrentTimestamp()}    Estado de carga: ${response.status()}`);
+      console.log(`   Estado de carga: ${response.status()}`);
 
       // Verificar si hay mensaje de JavaScript no soportado
       const content = await page.content();
@@ -468,7 +466,7 @@ async function runCycle() {
 
         // Verificar que estamos en el dashboard
         const currentUrl = page.url();
-        console.log(`${getCurrentTimestamp()} 📍 URL después del login: ${currentUrl}`);
+        console.log(`📍 URL después del login: ${currentUrl}`);
 
         if (!currentUrl.includes("dashboard.honeygain.com/")) {
           throw new Error("No se pudo acceder al dashboard después del login");
@@ -485,7 +483,7 @@ async function runCycle() {
       await page.waitForTimeout(5000); // Esperar un poco más después de refrescar
     }
 
-    // --- LÓGICA MEJORADA: Verificar balance ANTES de cualquier acción ---
+    // --- LÓGICA MEJORADA: Verificar balance ANTES de reclamar ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
     // Esperar un poco más para que el contenido dinámico se cargue
     await page.waitForTimeout(5000);
@@ -575,34 +573,9 @@ async function runCycle() {
               await page.waitForTimeout(5000);
 
               // Verificar el nuevo balance
-              console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
-              await page.waitForTimeout(5000); // Esperar a que el contenido dinámico se cargue
-
-              let balanceAfter = "0";
-              let balanceAfterFound = false;
-
-              // Usar la función para encontrar el contenedor del balance (nuevamente después del refresh)
-              const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
-              if (newBalanceContainerSelector) {
-                  try {
-                    const newBalanceContainer = await page.$(newBalanceContainerSelector);
-                    // Usar la nueva función para extraer el balance del contenedor
-                    const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
-                    if (extractedNewBalance) {
-                        balanceAfter = extractedNewBalance;
-                        balanceAfterFound = true;
-                        console.log(`${getCurrentTimestamp()} ✅ Balance DESPUÉS encontrado: ${balanceAfter}`);
-                    } else {
-                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance (DESPUÉS).`);
-                    }
-                  } catch (e) {
-                    console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado (DESPUÉS): ${e.message}`);
-                  }
-              }
-
-              if (!balanceAfterFound) {
-                throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
-              }
+              console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo balance...`);
+              await page.waitForSelector('div.money span', { timeout: 15000 });
+              const balanceAfter = await page.$eval('div.money span', el => el.textContent);
 
               console.log(`${getCurrentTimestamp()} 💰 Balance DESPUÉS: ${balanceAfter}`);
 
@@ -611,7 +584,7 @@ async function runCycle() {
               if (balanceIncreased) {
                   console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
                   // Enviar notificación de éxito SOLO SI EL BALANCE AUMENTÓ
-                  await sendNotification("Premio Packetshare reclamado con aumento de balance");
+                  await sendNotification("Premio Honeygain reclamado con aumento de balance");
               } else {
                   console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar. Puede que el premio haya sido $0 o haya un retraso en la actualización.`);
                   // NO se envía notificación si el balance no aumenta
