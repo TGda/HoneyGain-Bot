@@ -121,7 +121,6 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
     });
 }
 
-
 let browser;
 let page;
 let isFirstRun = true;
@@ -134,8 +133,8 @@ let lastPotNth = 5;     // Inicializamos con el valor que sabemos que funcionó
 async function login() {
   for (let attempt = 1; attempt < 4; ++attempt) {
     try {
-      const email = process.env.PACKET_EMAIL;
-      const password = process.env.PACKET_PASSWORD;
+      const email = process.env.EMAIL;
+      const password = process.env.PASSWORD;
 
       console.log(`${getCurrentTimestamp()} ✍️ Escribiendo credenciales (intento ${attempt})...`);
       await page.type("#email", email, { delay: 50 });
@@ -303,6 +302,7 @@ async function findAndExtractCountdownByText() {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página (fallback)...`);
     try {
         // Evaluar en toda la página buscando un elemento que contenga EXACTAMENTE el texto esperado
+        // CORREGIDO: No usar getCurrentTimestamp dentro de page.evaluate
         const countdownInfo = await page.evaluate(() => {
             // Textos exactos que identifican el conteo regresivo
             const labelTimes = ["time left to collect", "next pot available in"];
@@ -394,7 +394,6 @@ async function findAndExtractCountdownByText() {
     return { found: false };
 }
 
-
 // Función principal del ciclo
 async function runCycle() {
   try {
@@ -426,11 +425,11 @@ async function runCycle() {
       page = await browser.newPage();
 
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
-      const response = await page.goto("https://dashboard.packetshare.io/login/", {
+      const response = await page.goto("https://dashboard.honeygain.com/login", {
         waitUntil: "networkidle2",
         timeout: 60000,
       });
-      console.log(`   Estado de carga: ${response.status()}`);
+      console.log(`${getCurrentTimestamp()}    Estado de carga: ${response.status()}`);
 
       // Verificar si hay mensaje de JavaScript no soportado
       const content = await page.content();
@@ -456,11 +455,11 @@ async function runCycle() {
       await page.waitForSelector('#password', { timeout: 15000 });
       await page.waitForSelector("div.btn.login", { timeout: 10000 });
 
-      const email = process.env.PACKET_EMAIL;
-      const password = process.env.PACKET_PASSWORD;
+      const email = process.env.EMAIL;
+      const password = process.env.PASSWORD;
 
       if (!email || !password) {
-        throw new Error("❌ Variables de entorno PACKET_EMAIL y PACKET_PASSWORD requeridas.");
+        throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
       }
 
       // Realizar login
@@ -469,9 +468,9 @@ async function runCycle() {
 
         // Verificar que estamos en el dashboard
         const currentUrl = page.url();
-        console.log(`📍 URL después del login: ${currentUrl}`);
+        console.log(`${getCurrentTimestamp()} 📍 URL después del login: ${currentUrl}`);
 
-        if (!currentUrl.includes("dashboard.packetshare.io/")) {
+        if (!currentUrl.includes("dashboard.honeygain.com/")) {
           throw new Error("No se pudo acceder al dashboard después del login");
         }
       } else {
@@ -486,7 +485,7 @@ async function runCycle() {
       await page.waitForTimeout(5000); // Esperar un poco más después de refrescar
     }
 
-    // --- LÓGICA MEJORADA: Verificar balance ANTES de reclamar ---
+    // --- LÓGICA MEJORADA: Verificar balance ANTES de cualquier acción ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
     // Esperar un poco más para que el contenido dinámico se cargue
     await page.waitForTimeout(5000);
@@ -575,9 +574,9 @@ async function runCycle() {
               await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
               await page.waitForTimeout(5000);
 
+              // Verificar el nuevo balance
               console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
-              // Esperar un poco más para que el contenido dinámico se cargue
-              await page.waitForTimeout(5000);
+              await page.waitForTimeout(5000); // Esperar a que el contenido dinámico se cargue
 
               let balanceAfter = "0";
               let balanceAfterFound = false;
@@ -621,7 +620,7 @@ async function runCycle() {
               // Esperar 5 minutos antes del próximo intento
               console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
               setTimeout(runCycle, 300000); // 5 minutos
-
+              
           } else {
               console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un botón (<button>) dentro del contenedor encontrado.`);
               console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
