@@ -1,14 +1,13 @@
 // bot.js
 const puppeteer = require("puppeteer");
-const http = require("http"); // Para enviar notificaciones HTTP/HTTPS
-const https = require("https"); // Para enviar notificaciones HTTPS
+const http = require("http");
+const https = require("https");
 
-// Función para obtener la fecha y hora actual formateada [DDMMMYY HH:MM:SS]
 function getCurrentTimestamp() {
   const now = new Date();
   const day = String(now.getDate()).padStart(2, '0');
-  const month = now.toLocaleDateString('en-US', { month: 'short' }); // Ej: Oct
-  const year = String(now.getFullYear()).slice(-2); // Últimos 2 dígitos del año
+  const month = now.toLocaleDateString('en-US', { month: 'short' });
+  const year = String(now.getFullYear()).slice(-2);
   const timeStr = now.toLocaleTimeString('es-ES', {
     hour12: false,
     hour: '2-digit',
@@ -18,10 +17,7 @@ function getCurrentTimestamp() {
   return `[${day}${month}${year} ${timeStr}]`;
 }
 
-// Función para extraer segundos del texto del temporizador
 function parseCountdownText(countdownText) {
-  // Ejemplo: "06 hours 23 min 28 sec" -> { hours: 6, minutes: 23, seconds: 28 }
-  // También puede ser "21 hours 15 min 42 sec"
   const regex = /(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/;
   const match = countdownText.match(regex);
 
@@ -33,17 +29,14 @@ function parseCountdownText(countdownText) {
     };
   }
 
-  // Si no coincide el formato, asumir 0 segundos para evitar errores
   console.warn(`${getCurrentTimestamp()} ⚠️ No se pudo parsear el texto del temporizador: "${countdownText}". Usando 0 segundos.`);
   return { hours: 0, minutes: 0, seconds: 0 };
 }
 
-// Función para convertir tiempo a milisegundos
 function timeToMilliseconds(timeObj) {
   return (timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds) * 1000;
 }
 
-// Función para calcular la hora futura
 function getFutureTime(milliseconds) {
   const now = new Date();
   const future = new Date(now.getTime() + milliseconds);
@@ -61,11 +54,8 @@ function getFutureTime(milliseconds) {
   return { dateStr, timeStr };
 }
 
-// Función para enviar una notificación POST condicional
-async function sendNotification(message) { // 'message' se mantiene por si se desea en el futuro
+async function sendNotification(message) {
     const notificationUrl = process.env.NOTIFICATION;
-    
-    // Solo enviar si la variable NOTIFICATION está definida y no está vacía
     if (!notificationUrl) {
         console.log(`${getCurrentTimestamp()} ℹ️ Variable NOTIFICATION no definida. Omitiendo notificación.`);
         return;
@@ -74,61 +64,50 @@ async function sendNotification(message) { // 'message' se mantiene por si se de
     console.log(`${getCurrentTimestamp()} 📢 Enviando notificación a: ${notificationUrl}`);
     
     return new Promise((resolve) => {
-        const postData = ''; // Sin datos en el cuerpo del POST
-        
-        // Usar 'new URL()' para parsear correctamente el protocolo (http o https), hostname, puerto y path
+        const postData = '';
         let url;
         try {
            url = new URL(notificationUrl);
         } catch (err) {
             console.error(`${getCurrentTimestamp()} ⚠️ Error al parsear la URL de notificación '${notificationUrl}': ${err.message}. Omitiendo notificación.`);
-            resolve(); // Resolver para no romper el flujo principal
+            resolve();
             return;
         }
         
-        // Determinar si usar 'http' o 'https' basado en el protocolo de la URL
         const isHttps = url.protocol === 'https:';
-        const httpModule = isHttps ? https : http; // Usar módulos específicos
+        const httpModule = isHttps ? https : http;
 
         const options = {
             hostname: url.hostname,
-            port: url.port || (isHttps ? 443 : 80), // Puerto por defecto si no se especifica
-            path: url.pathname + url.search, // Incluye ruta y parámetros de consulta
+            port: url.port || (isHttps ? 443 : 80),
+            path: url.pathname + url.search,
             method: 'POST',
             headers: {
-                // 'Content-Type': 'application/json', // Opcional: Puedes eliminarlo si no es requerido por el endpoint
                 'Content-Length': Buffer.byteLength(postData)
             }
         };
 
-        // Crear la solicitud usando el módulo apropiado (http o https)
         const req = httpModule.request(options, (res) => {
             console.log(`${getCurrentTimestamp()} ✅ Notificación enviada. Código de estado: ${res.statusCode}`);
-            resolve(); // Resolvemos la promesa independientemente del código de estado
+            resolve();
         });
 
         req.on('error', (e) => {
             console.error(`${getCurrentTimestamp()} ⚠️ Error al enviar notificación a '${notificationUrl}': ${e.message}`);
-            // No resolvemos con error para no romper el flujo principal
             resolve(); 
         });
 
-        // Escribir datos al cuerpo de la solicitud (vacío en este caso)
         req.write(postData);
         req.end();
     });
 }
 
-
 let browser;
 let page;
 let isFirstRun = true;
+let lastBalanceNth = 2;
+let lastPotNth = 5;
 
-// Variables para recordar el último nth-child exitoso
-let lastBalanceNth = 2; // Inicializamos con el valor que sabemos que funcionó
-let lastPotNth = 5;     // Inicializamos con el valor que sabemos que funcionó
-
-// Función para login con reintentos
 async function login() {
   for (let attempt = 1; attempt < 4; ++attempt) {
     try {
@@ -140,7 +119,6 @@ async function login() {
       await page.type("#password", password, { delay: 50 });
 
       console.log(`${getCurrentTimestamp()} 🔑 Enviando login...`);
-      // Corregido: Selector del botón de login
       await page.click(".sc-kLhKbu.dEXYZj.hg-login-with-email");
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 });
       return true;
@@ -154,9 +132,7 @@ async function login() {
   }
 }
 
-// Función para encontrar un selector probando diferentes valores de nth-child
 async function findElementByNthChild(baseSelector, nthValues, description) {
-  // Primero intentar con el último valor que funcionó
   const lastNth = description === 'balance' ? lastBalanceNth : lastPotNth;
   const lastNthSelector = baseSelector.replace('NTH', lastNth.toString());
   console.log(`${getCurrentTimestamp()} 🔍 Intentando ${description} con último nth-child exitoso (${lastNth})...`);
@@ -168,15 +144,13 @@ async function findElementByNthChild(baseSelector, nthValues, description) {
     console.log(`${getCurrentTimestamp()} ⚠️ ${description} no encontrado con nth-child(${lastNth}). Probando otros valores...`);
   }
 
-  // Si el último no funciona, recorrer la lista
   for (const n of nthValues) {
-    if (n === lastNth) continue; // Ya probamos este
+    if (n === lastNth) continue;
     const tentativeSelector = baseSelector.replace('NTH', n.toString());
     console.log(`${getCurrentTimestamp()} 🔍 Probando ${description} con nth-child(${n})...`);
     try {
       await page.waitForSelector(tentativeSelector, { timeout: 5000 });
       console.log(`${getCurrentTimestamp()} ✅ ${description} encontrado con nth-child(${n}).`);
-      // Actualizar la variable global con el nuevo valor exitoso
       if (description === 'balance') {
         lastBalanceNth = n;
       } else {
@@ -184,47 +158,32 @@ async function findElementByNthChild(baseSelector, nthValues, description) {
       }
       return tentativeSelector;
     } catch (e) {
-      continue; // Intentar con el siguiente valor
+      continue;
     }
   }
-  // Si ninguno funciona
   console.log(`${getCurrentTimestamp()} ⚠️ No se encontró el selector de ${description} con ninguno de los valores de nth-child probados.`);
   return null;
 }
 
-// Función para extraer el balance numérico de un contenedor ya encontrado
 async function extractBalanceFromContainer(containerElement) {
     if (!containerElement) {
         console.log(`${getCurrentTimestamp()} ⚠️ Contenedor de balance no proporcionado para extracción.`);
         return null;
     }
     try {
-        // 1. Obtener todo el texto del contenedor
         const fullText = await page.evaluate(element => element.textContent, containerElement);
-        console.log(`${getCurrentTimestamp()} ℹ️ Texto completo del contenedor de balance: "${fullText}"`);
-
-        // 2. Buscar la posición de "Current balance"
         const balanceLabelIndex = fullText.toLowerCase().indexOf('current balance');
         if (balanceLabelIndex === -1) {
             console.log(`${getCurrentTimestamp()} ⚠️ No se encontró la etiqueta 'Current balance' en el contenedor.`);
             return null;
         }
 
-        // 3. Extraer el texto que viene después de "Current balance"
         const textAfterLabel = fullText.substring(balanceLabelIndex + 'current balance'.length).trim();
-        console.log(`${getCurrentTimestamp()} ℹ️ Texto después de 'Current balance': "${textAfterLabel}"`);
-
-        // 4. Buscar un patrón numérico que coincida con formatos comunes de balance en ese fragmento
-        //    Busca dígitos, posiblemente separados por comas o puntos, incluyendo puntos/comas decimales
-        //    y que esté al principio del texto extraído (o después de espacios)
-        const balanceRegex = /^\s*([\d.,]+\d)/; // ^ indica inicio del string, \s* espacios iniciales
+        const balanceRegex = /^\s*([\d.,]+\d)/;
         const match = textAfterLabel.match(balanceRegex);
 
         if (match && match[1]) {
             const potentialBalance = match[1];
-            console.log(`${getCurrentTimestamp()} ℹ️ Valor numérico potencial encontrado después de 'Current balance': "${potentialBalance}"`);
-            // Validar que el match tenga sentido como balance (no es solo un número suelto)
-            // Una simple validación: que tenga al menos un separador (, o .) o sea mayor a 999
             if (potentialBalance.includes(',') || potentialBalance.includes('.') || parseInt(potentialBalance.replace(/,/g, '').replace(/\./g, ''), 10) > 999) {
                 return potentialBalance;
             } else {
@@ -239,25 +198,53 @@ async function extractBalanceFromContainer(containerElement) {
     return null;
 }
 
-// *** Nueva función: Buscar conteo regresivo por selector CSS ***
-async function findAndExtractCountdownBySelector() {
-    console.log(`${getCurrentTimestamp()} 🔍 Intentando encontrar conteo regresivo por selector CSS...`);
-    try {
-        // Selector basado en el elemento HTML proporcionado
-        const countdownContainerSelector = 'div.sc-duWCru.dPYLJV';
-        
-        // Esperar a que el contenedor esté presente
-        await page.waitForSelector(countdownContainerSelector, { timeout: 5000 });
-        console.log(`${getCurrentTimestamp()} ✅ Contenedor del conteo regresivo encontrado por selector.`);
+// *** Nueva función: Buscar botón de "Claim" directamente ***
+async function findClaimButton() {
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de 'Claim'...`);
 
-        // Verificar si contiene alguna de las etiquetas válidas
+    // Definir la base del selector para el contenedor del botón
+    const potBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
+    const possiblePotNths = [1, 2, 3, 4, 5];
+
+    let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'botón de claim');
+    if (potContainerSelector) {
+        try {
+            const claimButton = await page.$(`${potContainerSelector} button`);
+            if (claimButton) {
+                const buttonText = await page.evaluate(el => el.textContent.trim(), claimButton);
+                // Normalizamos el texto para evitar problemas de espacios o mayúsculas
+                if (buttonText.toLowerCase().includes('claim')) {
+                    console.log(`${getCurrentTimestamp()} ✅ Botón de 'Claim' encontrado. Texto: "${buttonText}"`);
+                    return { found: true, selector: potContainerSelector };
+                } else {
+                    console.log(`${getCurrentTimestamp()} ℹ️ Botón encontrado, pero texto no coincide con 'Claim': "${buttonText}"`);
+                }
+            } else {
+                console.log(`${getCurrentTimestamp()} ⚠️ Contenedor encontrado, pero no contiene un botón.`);
+            }
+        } catch (e) {
+            console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor: ${e.message}`);
+        }
+    }
+
+    console.log(`${getCurrentTimestamp()} ❌ No se encontró botón de 'Claim'.`);
+    return { found: false };
+}
+
+// *** Función para buscar temporizador solo si no hay botón ***
+async function findAndExtractCountdown() {
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador (solo porque no hay botón de 'Claim')...`);
+
+    // Estrategia 1: por selector CSS
+    try {
+        const countdownContainerSelector = 'div.sc-duWCru.dPYLJV';
+        await page.waitForSelector(countdownContainerSelector, { timeout: 5000 });
         const container = await page.$(countdownContainerSelector);
         const containerText = await page.evaluate(el => el.textContent, container);
         const lowerText = containerText.toLowerCase();
 
         const validLabels = ["time left to collect", "next pot available in"];
         let foundLabel = null;
-
         for (const label of validLabels) {
             if (lowerText.includes(label)) {
                 foundLabel = label;
@@ -266,121 +253,83 @@ async function findAndExtractCountdownBySelector() {
         }
 
         if (foundLabel) {
-            console.log(`${getCurrentTimestamp()} ✅ Texto '${foundLabel}' encontrado en el contenedor.`);
-            
-            // Buscar el elemento <p> que contiene el temporizador
+            console.log(`${getCurrentTimestamp()} ✅ Etiqueta de temporizador encontrada: '${foundLabel}'`);
             const timeParagraphSelector = `${countdownContainerSelector} > p.sc-etPtWW.hRiIai`;
             await page.waitForSelector(timeParagraphSelector, { timeout: 2000 });
-            
-            // Extraer el texto del temporizador del párrafo
             const timeText = await page.$eval(timeParagraphSelector, el => el.textContent);
-            console.log(`${getCurrentTimestamp()} ✅ Texto del temporizador extraído: ${timeText}`);
-
             if (timeText) {
                 const timeObj = parseCountdownText(timeText);
-                const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
-
-                const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
-                const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-                console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-
-                return { found: true, waitTimeMs };
-            } else {
-                console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer el texto del temporizador del párrafo encontrado.`);
+                const totalSeconds = timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds;
+                if (totalSeconds > 0) {
+                    const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
+                    const { dateStr, timeStr } = getFutureTime(waitTimeMs);
+                    const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+                    console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
+                    return { found: true, waitTimeMs };
+                } else {
+                    console.log(`${getCurrentTimestamp()} ℹ️ Temporizador encontrado, pero el tiempo es 0. Proceder como si no hubiera temporizador.`);
+                }
             }
-        } else {
-             console.log(`${getCurrentTimestamp()} ⚠️ El contenedor encontrado no contiene ninguna etiqueta de temporizador conocida.`);
         }
     } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo por selector CSS: ${e.message}`);
+        // Silently continue to fallback
     }
-    
-    console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo usando el selector CSS principal.`);
-    return { found: false };
-}
 
-// *** Nueva función: Buscar conteo regresivo por texto en toda la página (fallback) ***
-async function findAndExtractCountdownByText() {
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando conteo regresivo por texto en toda la página (fallback)...`);
+    // Estrategia 2: búsqueda por texto en toda la página
     try {
-        const validLabels = ["time left to collect", "next pot available in"];
-        const validLabelsLower = validLabels.map(l => l.toLowerCase());
-
+        const validLabelsLower = ["time left to collect", "next pot available in"];
         const countdownInfo = await page.evaluate((labels) => {
-            const divElements = document.querySelectorAll('div');
-
-            for (let divElement of divElements) {
-                const divText = divElement.textContent?.toLowerCase().trim();
-                if (!divText) continue;
-
-                // Verificar si contiene alguna de las etiquetas válidas
+            const divs = document.querySelectorAll('div');
+            for (const div of divs) {
+                const text = div.textContent?.toLowerCase() || '';
                 let foundLabel = null;
                 for (const label of labels) {
-                    if (divText.includes(label)) {
+                    if (text.includes(label)) {
                         foundLabel = label;
                         break;
                     }
                 }
-
                 if (foundLabel) {
-                    console.log(`%c${getCurrentTimestamp()} ℹ️ Posible contenedor de conteo encontrado con etiqueta: ${foundLabel}`, 'color: orange;');
-
-                    const potentialContainers = divElement.querySelectorAll('*');
-                    for (let container of potentialContainers) {
-                        const spans = container.querySelectorAll('span');
-                        if (spans.length >= 4) {
-                            let timeParts = [];
-                            let isValidTimeStructure = true;
-
-                            for (let i = 0; i < Math.min(spans.length, 6); i++) {
-                                const spanText = spans[i].textContent?.trim();
-                                if (spanText) {
-                                    timeParts.push(spanText);
-                                } else {
-                                    isValidTimeStructure = false;
-                                    break;
-                                }
-                            }
-
-                            if (isValidTimeStructure && timeParts.length >= 4) {
-                                const countdownText = timeParts.join(' ');
-                                if (countdownText.toLowerCase().includes('hours') && countdownText.toLowerCase().includes('min')) {
-                                    console.log(`%c${getCurrentTimestamp()} ✅ Conteo regresivo encontrado y validado.`, 'color: green;');
-                                    return {
-                                        text: countdownText,
-                                        elementHtml: divElement.outerHTML.substring(0, 200)
-                                    };
-                                }
+                    const spans = div.querySelectorAll('span');
+                    if (spans.length >= 4) {
+                        let parts = [];
+                        for (let i = 0; i < Math.min(spans.length, 6); i++) {
+                            const t = spans[i].textContent?.trim();
+                            if (t) parts.push(t);
+                        }
+                        if (parts.length >= 4) {
+                            const timeStr = parts.join(' ');
+                            if (timeStr.toLowerCase().includes('hours') && timeStr.toLowerCase().includes('min')) {
+                                return { text: timeStr };
                             }
                         }
                     }
                 }
             }
-
             return null;
         }, validLabelsLower);
 
         if (countdownInfo && countdownInfo.text) {
-            console.log(`${getCurrentTimestamp()} ✅ Conteo regresivo encontrado por texto: ${countdownInfo.text}`);
-
             const timeObj = parseCountdownText(countdownInfo.text);
-            const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
-
-            const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureTime(waitTimeMs);
-            const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-            console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-
-            return { found: true, waitTimeMs };
-        } else {
-            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró texto relacionado con conteo regresivo en la página.`);
+            const totalSeconds = timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds;
+            if (totalSeconds > 0) {
+                const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
+                const { dateStr, timeStr } = getFutureTime(waitTimeMs);
+                const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+                console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
+                return { found: true, waitTimeMs };
+            } else {
+                console.log(`${getCurrentTimestamp()} ℹ️ Temporizador por texto encontrado, pero tiempo es 0.`);
+            }
         }
     } catch (e) {
-        console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar conteo regresivo por texto: ${e.message}`);
+        console.log(`${getCurrentTimestamp()} ⚠️ Error en búsqueda fallback de temporizador: ${e.message}`);
     }
+
+    console.log(`${getCurrentTimestamp()} ❌ No se encontró temporizador válido con tiempo > 0.`);
     return { found: false };
 }
 
-// Función principal del ciclo
 async function runCycle() {
   try {
     if (isFirstRun) {
@@ -408,7 +357,6 @@ async function runCycle() {
       });
 
       page = await browser.newPage();
-
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
       const response = await page.goto("https://dashboard.honeygain.com/login", {
         waitUntil: "networkidle2",
@@ -421,7 +369,6 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} ⚠️ La página indica que el navegador no soporta JavaScript.`);
       }
 
-      console.log(`${getCurrentTimestamp()} 🔍 Esperando botón inicial...`);
       try {
         await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 });
         console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón inicial...`);
@@ -430,13 +377,11 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón inicial, continuando...`);
       }
 
-      console.log(`${getCurrentTimestamp()} 🔍 Esperando campos de login...`);
       await page.waitForSelector('#email', { timeout: 15000 });
       await page.waitForSelector('#password', { timeout: 15000 });
 
       const email = process.env.EMAIL;
       const password = process.env.PASSWORD;
-
       if (!email || !password) {
         throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
       }
@@ -444,8 +389,6 @@ async function runCycle() {
       if (await login()) {
         console.log(`${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.`);
         const currentUrl = page.url();
-        console.log(`${getCurrentTimestamp()} 📍 URL después del login: ${currentUrl}`);
-
         if (!currentUrl.includes("dashboard.honeygain.com/")) {
           throw new Error("No se pudo acceder al dashboard después del login");
         }
@@ -460,7 +403,8 @@ async function runCycle() {
       await page.waitForTimeout(5000);
     }
 
-    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
+    // --- Obtener balance antes ---
+    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES...`);
     await page.waitForTimeout(5000);
 
     const balanceBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div';
@@ -468,127 +412,82 @@ async function runCycle() {
 
     let balanceBefore = "0";
     let balanceBeforeFound = false;
-
     const balanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
     if (balanceContainerSelector) {
-        try {
-          const balanceContainer = await page.$(balanceContainerSelector);
-          const extractedBalance = await extractBalanceFromContainer(balanceContainer);
-          if (extractedBalance) {
-              balanceBefore = extractedBalance;
-              balanceBeforeFound = true;
-              console.log(`${getCurrentTimestamp()} ✅ Balance ANTES encontrado: ${balanceBefore}`);
-          } else {
-              console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor encontrado (ANTES).`);
-          }
-        } catch (e) {
-          console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer balance del contenedor encontrado (ANTES): ${e.message}`);
+        const balanceContainer = await page.$(balanceContainerSelector);
+        const extractedBalance = await extractBalanceFromContainer(balanceContainer);
+        if (extractedBalance) {
+            balanceBefore = extractedBalance;
+            balanceBeforeFound = true;
+            console.log(`${getCurrentTimestamp()} ✅ Balance ANTES: ${balanceBefore}`);
         }
     }
 
     if (!balanceBeforeFound) {
-      throw new Error("No se pudo encontrar el elemento del balance ANTES de reclamar después de múltiples intentos.");
+      throw new Error("No se pudo encontrar el balance antes de reclamar.");
     }
 
-    console.log(`${getCurrentTimestamp()} 🔍 Verificando si hay conteo regresivo o botón de reclamar...`);
-    await page.waitForTimeout(3000);
+    // --- ✅ NUEVA LÓGICA: Primero buscar botón de Claim ---
+    const claimButtonResult = await findClaimButton();
 
-    let countdownResult = await findAndExtractCountdownBySelector();
-    if (!countdownResult.found) {
-        countdownResult = await findAndExtractCountdownByText();
+    if (claimButtonResult.found) {
+        console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón de 'Claim'...`);
+        await page.click(`${claimButtonResult.selector} button`);
+
+        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar...`);
+        await page.waitForTimeout(5000);
+
+        // --- Obtener balance después ---
+        console.log(`${getCurrentTimestamp()} 🔄 Refrescando para obtener balance DESPUÉS...`);
+        await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+        await page.waitForTimeout(5000);
+
+        let balanceAfter = "0";
+        let balanceAfterFound = false;
+        const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
+        if (newBalanceContainerSelector) {
+            const newBalanceContainer = await page.$(newBalanceContainerSelector);
+            const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
+            if (extractedNewBalance) {
+                balanceAfter = extractedNewBalance;
+                balanceAfterFound = true;
+                console.log(`${getCurrentTimestamp()} ✅ Balance DESPUÉS: ${balanceAfter}`);
+            }
+        }
+
+        if (!balanceAfterFound) {
+            throw new Error("No se pudo encontrar el balance después de reclamar.");
+        }
+
+        const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
+        if (balanceIncreased) {
+            console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
+            await sendNotification("Premio Honeygain reclamado con aumento de balance");
+        } else {
+            console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar.`);
+        }
+
+        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
+        setTimeout(runCycle, 300000);
+        return;
     }
 
+    // --- ❌ No hay botón: buscar temporizador para esperar ---
+    const countdownResult = await findAndExtractCountdown();
     if (countdownResult.found) {
         setTimeout(runCycle, countdownResult.waitTimeMs);
         return;
     }
 
-    console.log(`${getCurrentTimestamp()} ℹ️ No se encontró conteo regresivo. Verificando si hay botón de reclamar...`);
-
-    const potBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
-    const possiblePotNths = [1, 2, 3, 4, 5];
-
-    let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'conteo/botón');
-    if (potContainerSelector) {
-        try {
-          const claimButton = await page.$(`${potContainerSelector} button`);
-          if (claimButton) {
-              const buttonText = await page.evaluate(el => el.textContent, claimButton);
-              console.log(`${getCurrentTimestamp()} ✅ Botón de reclamar encontrado (en contenedor encontrado). Texto del botón: "${buttonText}". Haciendo clic para reclamar el premio...`);
-
-              await page.click(`${potContainerSelector} button`);
-              console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
-              await page.waitForTimeout(5000);
-
-              console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
-              await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-              await page.waitForTimeout(5000);
-              
-              console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
-              await page.waitForTimeout(5000);
-
-              let balanceAfter = "0";
-              let balanceAfterFound = false;
-
-              const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
-              if (newBalanceContainerSelector) {
-                  try {
-                    const newBalanceContainer = await page.$(newBalanceContainerSelector);
-                    const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
-                    if (extractedNewBalance) {
-                        balanceAfter = extractedNewBalance;
-                        balanceAfterFound = true;
-                        console.log(`${getCurrentTimestamp()} ✅ Balance DESPUÉS encontrado: ${balanceAfter}`);
-                    } else {
-                        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo extraer un valor numérico válido del contenedor del nuevo balance (DESPUÉS).`);
-                    }
-                  } catch (e) {
-                    console.log(`${getCurrentTimestamp()} ⚠️ Error al extraer nuevo balance del contenedor encontrado (DESPUÉS): ${e.message}`);
-                  }
-              }
-
-              if (!balanceAfterFound) {
-                throw new Error("No se pudo encontrar el nuevo elemento del balance después de múltiples intentos.");
-              }
-
-              const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
-              
-              if (balanceIncreased) {
-                  console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
-                  await sendNotification("Premio Honeygain reclamado con aumento de balance");
-              } else {
-                  console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar.`);
-              }
-              
-              console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
-              setTimeout(runCycle, 300000);
-
-          } else {
-              console.log(`${getCurrentTimestamp()} ⚠️ No se encontró un botón (<button>) dentro del contenedor encontrado.`);
-              console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
-              setTimeout(runCycle, 300000);
-          }
-        } catch (claimButtonError) {
-          console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar botón de reclamar en contenedor encontrado: ${claimButtonError.message}`);
-          console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni conteo regresivo ni botón de reclamar. Reintentando en 5 minutos...`);
-          setTimeout(runCycle, 300000);
-        }
-    } else {
-        console.log(`${getCurrentTimestamp()} ⚠️ No se encontró contenedor para conteo ni botón. Reintentando en 5 minutos...`);
-        setTimeout(runCycle, 300000);
-    }
+    // --- Si no hay botón ni temporizador, esperar 5 minutos ---
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Reintentando en 5 minutos...`);
+    setTimeout(runCycle, 300000);
 
   } catch (err) {
     console.error(`${getCurrentTimestamp()} ⚠️ Error en el ciclo:`, err.message);
-
     if (browser) {
-      try {
-        await browser.close();
-      } catch (closeErr) {
-        console.error(`${getCurrentTimestamp()} ⚠️ Error al cerrar el navegador:`, closeErr.message);
-      }
+      try { await browser.close(); } catch (e) {}
     }
-
     console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
     setTimeout(() => {
       isFirstRun = true;
@@ -601,16 +500,12 @@ runCycle();
 
 process.on('SIGINT', async () => {
   console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de interrupción. Cerrando...`);
-  if (browser) {
-    await browser.close();
-  }
+  if (browser) await browser.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de terminación. Cerrando...`);
-  if (browser) {
-    await browser.close();
-  }
+  if (browser) await browser.close();
   process.exit(0);
 });
