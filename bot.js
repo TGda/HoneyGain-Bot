@@ -198,26 +198,30 @@ async function extractBalanceFromContainer(containerElement) {
     return null;
 }
 
-// *** Nueva función: Buscar botón de "Claim" directamente ***
+// *** Corregido: acepta "Claim" o "Open Lucky Pot" ***
 async function findClaimButton() {
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de 'Claim'...`);
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de acción ('Claim' o 'Open Lucky Pot')...`);
 
-    // Definir la base del selector para el contenedor del botón
     const potBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
     const possiblePotNths = [1, 2, 3, 4, 5];
 
     let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'botón de claim');
     if (potContainerSelector) {
         try {
+            // Esperar un poco más para asegurar que el botón se renderice
+            await page.waitForTimeout(2000);
             const claimButton = await page.$(`${potContainerSelector} button`);
             if (claimButton) {
                 const buttonText = await page.evaluate(el => el.textContent.trim(), claimButton);
-                // Normalizamos el texto para evitar problemas de espacios o mayúsculas
-                if (buttonText.toLowerCase().includes('claim')) {
-                    console.log(`${getCurrentTimestamp()} ✅ Botón de 'Claim' encontrado. Texto: "${buttonText}"`);
+                const lowerButtonText = buttonText.toLowerCase();
+                const validLabels = ['claim', 'open lucky pot'];
+                const isValid = validLabels.some(label => lowerButtonText.includes(label));
+
+                if (isValid) {
+                    console.log(`${getCurrentTimestamp()} ✅ Botón válido encontrado. Texto: "${buttonText}"`);
                     return { found: true, selector: potContainerSelector };
                 } else {
-                    console.log(`${getCurrentTimestamp()} ℹ️ Botón encontrado, pero texto no coincide con 'Claim': "${buttonText}"`);
+                    console.log(`${getCurrentTimestamp()} ℹ️ Botón encontrado, pero texto no coincide: "${buttonText}"`);
                 }
             } else {
                 console.log(`${getCurrentTimestamp()} ⚠️ Contenedor encontrado, pero no contiene un botón.`);
@@ -227,15 +231,13 @@ async function findClaimButton() {
         }
     }
 
-    console.log(`${getCurrentTimestamp()} ❌ No se encontró botón de 'Claim'.`);
+    console.log(`${getCurrentTimestamp()} ❌ No se encontró botón válido.`);
     return { found: false };
 }
 
-// *** Función para buscar temporizador solo si no hay botón ***
 async function findAndExtractCountdown() {
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador (solo porque no hay botón de 'Claim')...`);
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador (solo porque no hay botón válido)...`);
 
-    // Estrategia 1: por selector CSS
     try {
         const countdownContainerSelector = 'div.sc-duWCru.dPYLJV';
         await page.waitForSelector(countdownContainerSelector, { timeout: 5000 });
@@ -272,10 +274,9 @@ async function findAndExtractCountdown() {
             }
         }
     } catch (e) {
-        // Silently continue to fallback
+        // Silently continue
     }
 
-    // Estrategia 2: búsqueda por texto en toda la página
     try {
         const validLabelsLower = ["time left to collect", "next pot available in"];
         const countdownInfo = await page.evaluate((labels) => {
@@ -403,7 +404,6 @@ async function runCycle() {
       await page.waitForTimeout(5000);
     }
 
-    // --- Obtener balance antes ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES...`);
     await page.waitForTimeout(5000);
 
@@ -427,17 +427,17 @@ async function runCycle() {
       throw new Error("No se pudo encontrar el balance antes de reclamar.");
     }
 
-    // --- ✅ NUEVA LÓGICA: Primero buscar botón de Claim ---
+    // ✅ Primero: buscar botón válido
     const claimButtonResult = await findClaimButton();
 
     if (claimButtonResult.found) {
-        console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón de 'Claim'...`);
+        console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón válido...`);
         await page.click(`${claimButtonResult.selector} button`);
 
-        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar...`);
+        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de la acción...`);
         await page.waitForTimeout(5000);
 
-        // --- Obtener balance después ---
+        // Obtener balance después
         console.log(`${getCurrentTimestamp()} 🔄 Refrescando para obtener balance DESPUÉS...`);
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
         await page.waitForTimeout(5000);
@@ -456,7 +456,7 @@ async function runCycle() {
         }
 
         if (!balanceAfterFound) {
-            throw new Error("No se pudo encontrar el balance después de reclamar.");
+            throw new Error("No se pudo encontrar el balance después.");
         }
 
         const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
@@ -472,15 +472,14 @@ async function runCycle() {
         return;
     }
 
-    // --- ❌ No hay botón: buscar temporizador para esperar ---
+    // ❌ No hay botón: buscar temporizador
     const countdownResult = await findAndExtractCountdown();
     if (countdownResult.found) {
         setTimeout(runCycle, countdownResult.waitTimeMs);
         return;
     }
 
-    // --- Si no hay botón ni temporizador, esperar 5 minutos ---
-    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Reintentando en 5 minutos...`);
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Reintentando en 5 minutos...");
     setTimeout(runCycle, 300000);
 
   } catch (err) {
