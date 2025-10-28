@@ -1,4 +1,4 @@
-// bot.js
+// bot.js - Versión v1.1
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -198,6 +198,7 @@ async function extractBalanceFromContainer(containerElement) {
     return null;
 }
 
+// *** v1.1: Usa waitForSelector activo para el botón ***
 async function findClaimButton() {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de acción ('Claim' o 'Open Lucky Pot')...`);
 
@@ -207,8 +208,10 @@ async function findClaimButton() {
     let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'botón de claim');
     if (potContainerSelector) {
         try {
-            await page.waitForTimeout(2000);
-            const claimButton = await page.$(`${potContainerSelector} button`);
+            // Esperar activamente a que aparezca un botón dentro del contenedor (hasta 10 segundos)
+            const buttonSelector = `${potContainerSelector} button`;
+            await page.waitForSelector(buttonSelector, { timeout: 10000 });
+            const claimButton = await page.$(buttonSelector);
             if (claimButton) {
                 const buttonText = await page.evaluate(el => el.textContent.trim(), claimButton);
                 const lowerButtonText = buttonText.toLowerCase();
@@ -221,11 +224,13 @@ async function findClaimButton() {
                 } else {
                     console.log(`${getCurrentTimestamp()} ℹ️ Botón encontrado, pero texto no coincide: "${buttonText}"`);
                 }
-            } else {
-                console.log(`${getCurrentTimestamp()} ⚠️ Contenedor encontrado, pero no contiene un botón.`);
             }
         } catch (e) {
-            console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor: ${e.message}`);
+            if (e.name === 'TimeoutError') {
+                console.log(`${getCurrentTimestamp()} ⏳ Timeout: No se encontró botón dentro del contenedor en 10 segundos.`);
+            } else {
+                console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor: ${e.message}`);
+            }
         }
     }
 
