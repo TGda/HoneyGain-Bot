@@ -1,4 +1,4 @@
-// bot.js - Versión v1.1
+// bot.js - Versión v1.2
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -198,7 +198,7 @@ async function extractBalanceFromContainer(containerElement) {
     return null;
 }
 
-// *** v1.1: Usa waitForSelector activo para el botón ***
+// *** v1.2: Timeout aumentado a 25 segundos para el botón ***
 async function findClaimButton() {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de acción ('Claim' o 'Open Lucky Pot')...`);
 
@@ -208,9 +208,9 @@ async function findClaimButton() {
     let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'botón de claim');
     if (potContainerSelector) {
         try {
-            // Esperar activamente a que aparezca un botón dentro del contenedor (hasta 10 segundos)
+            // Esperar activamente hasta 25 segundos a que aparezca el botón
             const buttonSelector = `${potContainerSelector} button`;
-            await page.waitForSelector(buttonSelector, { timeout: 10000 });
+            await page.waitForSelector(buttonSelector, { timeout: 25000 });
             const claimButton = await page.$(buttonSelector);
             if (claimButton) {
                 const buttonText = await page.evaluate(el => el.textContent.trim(), claimButton);
@@ -227,7 +227,7 @@ async function findClaimButton() {
             }
         } catch (e) {
             if (e.name === 'TimeoutError') {
-                console.log(`${getCurrentTimestamp()} ⏳ Timeout: No se encontró botón dentro del contenedor en 10 segundos.`);
+                console.log(`${getCurrentTimestamp()} ⏳ Timeout: No se encontró botón dentro del contenedor en 25 segundos.`);
             } else {
                 console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor: ${e.message}`);
             }
