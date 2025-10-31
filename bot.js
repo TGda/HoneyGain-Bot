@@ -1,4 +1,4 @@
-// bot.js - Versión v1.2
+// bot.js - Versión v1.3
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -102,13 +102,8 @@ async function sendNotification(message) {
     });
 }
 
-let browser;
-let page;
-let isFirstRun = true;
-let lastBalanceNth = 2;
-let lastPotNth = 5;
-
-async function login() {
+// Función para login con reintentos (ahora dentro de cada ciclo)
+async function performLogin(page) {
   for (let attempt = 1; attempt < 4; ++attempt) {
     try {
       const email = process.env.EMAIL;
@@ -132,30 +127,15 @@ async function login() {
   }
 }
 
-async function findElementByNthChild(baseSelector, nthValues, description) {
-  const lastNth = description === 'balance' ? lastBalanceNth : lastPotNth;
-  const lastNthSelector = baseSelector.replace('NTH', lastNth.toString());
-  console.log(`${getCurrentTimestamp()} 🔍 Intentando ${description} con último nth-child exitoso (${lastNth})...`);
-  try {
-    await page.waitForSelector(lastNthSelector, { timeout: 5000 });
-    console.log(`${getCurrentTimestamp()} ✅ ${description} encontrado con nth-child(${lastNth}).`);
-    return lastNthSelector;
-  } catch (e) {
-    console.log(`${getCurrentTimestamp()} ⚠️ ${description} no encontrado con nth-child(${lastNth}). Probando otros valores...`);
-  }
-
+// Función para encontrar un selector probando diferentes valores de nth-child
+async function findElementByNthChild(page, baseSelector, nthValues, description) {
+  // Probamos todos los valores, no hay "último exitoso" porque es sesión nueva
   for (const n of nthValues) {
-    if (n === lastNth) continue;
     const tentativeSelector = baseSelector.replace('NTH', n.toString());
     console.log(`${getCurrentTimestamp()} 🔍 Probando ${description} con nth-child(${n})...`);
     try {
       await page.waitForSelector(tentativeSelector, { timeout: 5000 });
       console.log(`${getCurrentTimestamp()} ✅ ${description} encontrado con nth-child(${n}).`);
-      if (description === 'balance') {
-        lastBalanceNth = n;
-      } else {
-        lastPotNth = n;
-      }
       return tentativeSelector;
     } catch (e) {
       continue;
@@ -165,7 +145,8 @@ async function findElementByNthChild(baseSelector, nthValues, description) {
   return null;
 }
 
-async function extractBalanceFromContainer(containerElement) {
+// Función para extraer el balance numérico de un contenedor ya encontrado
+async function extractBalanceFromContainer(page, containerElement) {
     if (!containerElement) {
         console.log(`${getCurrentTimestamp()} ⚠️ Contenedor de balance no proporcionado para extracción.`);
         return null;
@@ -198,18 +179,19 @@ async function extractBalanceFromContainer(containerElement) {
     return null;
 }
 
-// *** v1.2: Timeout aumentado a 25 segundos para el botón ***
-async function findClaimButton() {
+// Buscar botón de acción
+async function findClaimButton(page) {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de acción ('Claim' o 'Open Lucky Pot')...`);
 
     const potBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
     const possiblePotNths = [1, 2, 3, 4, 5];
 
-    let potContainerSelector = await findElementByNthChild(potBaseSelector, possiblePotNths, 'botón de claim');
-    if (potContainerSelector) {
+    for (const n of possiblePotNths) {
+        const potContainerSelector = potBaseSelector.replace('NTH', n.toString());
         try {
-            // Esperar activamente hasta 25 segundos a que aparezca el botón
+            await page.waitForSelector(potContainerSelector, { timeout: 5000 });
             const buttonSelector = `${potContainerSelector} button`;
+            // Esperar hasta 25 segundos a que aparezca el botón
             await page.waitForSelector(buttonSelector, { timeout: 25000 });
             const claimButton = await page.$(buttonSelector);
             if (claimButton) {
@@ -227,9 +209,9 @@ async function findClaimButton() {
             }
         } catch (e) {
             if (e.name === 'TimeoutError') {
-                console.log(`${getCurrentTimestamp()} ⏳ Timeout: No se encontró botón dentro del contenedor en 25 segundos.`);
+                // Silently continue to next nth
             } else {
-                console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor: ${e.message}`);
+                console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor nth-child(${n}): ${e.message}`);
             }
         }
     }
@@ -238,8 +220,9 @@ async function findClaimButton() {
     return { found: false };
 }
 
-async function findAndExtractCountdown() {
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador (solo porque no hay botón válido)...`);
+// Buscar temporizador
+async function findAndExtractCountdown(page) {
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
 
     try {
         const countdownContainerSelector = 'div.sc-duWCru.dPYLJV';
@@ -272,7 +255,7 @@ async function findAndExtractCountdown() {
                     console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
                     return { found: true, waitTimeMs };
                 } else {
-                    console.log(`${getCurrentTimestamp()} ℹ️ Temporizador encontrado, pero el tiempo es 0. Proceder como si no hubiera temporizador.`);
+                    console.log(`${getCurrentTimestamp()} ℹ️ Temporizador encontrado, pero el tiempo es 0.`);
                 }
             }
         }
@@ -280,6 +263,7 @@ async function findAndExtractCountdown() {
         // Silently continue
     }
 
+    // Fallback por texto
     try {
         const validLabelsLower = ["time left to collect", "next pot available in"];
         const countdownInfo = await page.evaluate((labels) => {
@@ -334,79 +318,76 @@ async function findAndExtractCountdown() {
     return { found: false };
 }
 
+// Función principal del ciclo (ahora efímera)
 async function runCycle() {
+  let browser = null;
+  let page = null;
+
   try {
-    if (isFirstRun) {
-      console.log(`${getCurrentTimestamp()} 🚀 Iniciando bot de Honeygain...`);
-      browser = await puppeteer.launch({
-        headless: 'old',
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--disable-background-networking",
-          "--disable-translate",
-          "--disable-sync",
-          "--disable-background-timer-throttling",
-          "--disable-backgrounding-occluded-windows",
-          "--disable-breakpad",
-          "--disable-component-extensions-with-background-pages",
-          "--metrics-recording-only",
-          "--mute-audio",
-          "--no-first-run",
-          "--no-zygote",
-          "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-        ],
-      });
+    console.log(`${getCurrentTimestamp()} 🚀 Iniciando nueva sesión de Honeygain...`);
+    browser = await puppeteer.launch({
+      headless: 'old',
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-background-networking",
+        "--disable-translate",
+        "--disable-sync",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--metrics-recording-only",
+        "--mute-audio",
+        "--no-first-run",
+        "--no-zygote",
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+      ],
+    });
 
-      page = await browser.newPage();
-      console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
-      const response = await page.goto("https://dashboard.honeygain.com/login", {
-        waitUntil: "networkidle2",
-        timeout: 60000,
-      });
-      console.log(`${getCurrentTimestamp()}    Estado de carga: ${response.status()}`);
+    page = await browser.newPage();
+    console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
+    const response = await page.goto("https://dashboard.honeygain.com/login", {
+      waitUntil: "networkidle2",
+      timeout: 60000,
+    });
+    console.log(`${getCurrentTimestamp()}    Estado de carga: ${response.status()}`);
 
-      const content = await page.content();
-      if (content.includes("Your browser does not support JavaScript!")) {
-        console.log(`${getCurrentTimestamp()} ⚠️ La página indica que el navegador no soporta JavaScript.`);
-      }
-
-      try {
-        await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 });
-        console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón inicial...`);
-        await page.click(".sc-kLhKbu.cRDTkV");
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón inicial, continuando...`);
-      }
-
-      await page.waitForSelector('#email', { timeout: 15000 });
-      await page.waitForSelector('#password', { timeout: 15000 });
-
-      const email = process.env.EMAIL;
-      const password = process.env.PASSWORD;
-      if (!email || !password) {
-        throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
-      }
-
-      if (await login()) {
-        console.log(`${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.`);
-        const currentUrl = page.url();
-        if (!currentUrl.includes("dashboard.honeygain.com/")) {
-          throw new Error("No se pudo acceder al dashboard después del login");
-        }
-      } else {
-        throw new Error("No se pudo realizar el login");
-      }
-
-      isFirstRun = false;
-    } else {
-      console.log(`${getCurrentTimestamp()} 🔄 Refrescando dashboard...`);
-      await page.reload({ waitUntil: "networkidle2", timeout: 60000 });
-      await page.waitForTimeout(5000);
+    const content = await page.content();
+    if (content.includes("Your browser does not support JavaScript!")) {
+      console.log(`${getCurrentTimestamp()} ⚠️ La página indica que el navegador no soporta JavaScript.`);
     }
 
+    try {
+      await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 });
+      console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón inicial...`);
+      await page.click(".sc-kLhKbu.cRDTkV");
+    } catch (e) {
+      console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón inicial, continuando...`);
+    }
+
+    await page.waitForSelector('#email', { timeout: 15000 });
+    await page.waitForSelector('#password', { timeout: 15000 });
+
+    const email = process.env.EMAIL;
+    const password = process.env.PASSWORD;
+    if (!email || !password) {
+      throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
+    }
+
+    if (await performLogin(page)) {
+      console.log(`${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.`);
+      const currentUrl = page.url();
+      if (!currentUrl.includes("dashboard.honeygain.com/")) {
+        throw new Error("No se pudo acceder al dashboard después del login");
+      }
+    } else {
+      throw new Error("No se pudo realizar el login");
+    }
+
+    // --- Obtener balance ANTES ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES...`);
     await page.waitForTimeout(5000);
 
@@ -415,10 +396,10 @@ async function runCycle() {
 
     let balanceBefore = "0";
     let balanceBeforeFound = false;
-    const balanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
+    const balanceContainerSelector = await findElementByNthChild(page, balanceBaseSelector, possibleBalanceNths, 'balance');
     if (balanceContainerSelector) {
         const balanceContainer = await page.$(balanceContainerSelector);
-        const extractedBalance = await extractBalanceFromContainer(balanceContainer);
+        const extractedBalance = await extractBalanceFromContainer(page, balanceContainer);
         if (extractedBalance) {
             balanceBefore = extractedBalance;
             balanceBeforeFound = true;
@@ -430,7 +411,8 @@ async function runCycle() {
       throw new Error("No se pudo encontrar el balance antes de reclamar.");
     }
 
-    const claimButtonResult = await findClaimButton();
+    // --- Buscar botón ---
+    const claimButtonResult = await findClaimButton(page);
 
     if (claimButtonResult.found) {
         console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón válido...`);
@@ -439,16 +421,17 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} ⏳ Esperando después de la acción...`);
         await page.waitForTimeout(5000);
 
+        // --- Obtener balance DESPUÉS ---
         console.log(`${getCurrentTimestamp()} 🔄 Refrescando para obtener balance DESPUÉS...`);
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
         await page.waitForTimeout(5000);
 
         let balanceAfter = "0";
         let balanceAfterFound = false;
-        const newBalanceContainerSelector = await findElementByNthChild(balanceBaseSelector, possibleBalanceNths, 'balance');
+        const newBalanceContainerSelector = await findElementByNthChild(page, balanceBaseSelector, possibleBalanceNths, 'balance');
         if (newBalanceContainerSelector) {
             const newBalanceContainer = await page.$(newBalanceContainerSelector);
-            const extractedNewBalance = await extractBalanceFromContainer(newBalanceContainer);
+            const extractedNewBalance = await extractBalanceFromContainer(page, newBalanceContainer);
             if (extractedNewBalance) {
                 balanceAfter = extractedNewBalance;
                 balanceAfterFound = true;
@@ -468,18 +451,25 @@ async function runCycle() {
             console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar.`);
         }
 
-        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento en 5 minutos...`);
-        setTimeout(runCycle, 300000);
+        // Cerrar sesión y esperar 5 minutos antes del próximo ciclo
+        console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando 5 minutos antes del próximo ciclo...`);
+        if (browser) await browser.close();
+        setTimeout(runCycle, 300000); // 5 minutos
         return;
     }
 
-    const countdownResult = await findAndExtractCountdown();
+    // --- No hay botón: buscar temporizador ---
+    const countdownResult = await findAndExtractCountdown(page);
     if (countdownResult.found) {
+        console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando hasta el próximo pot...`);
+        if (browser) await browser.close();
         setTimeout(runCycle, countdownResult.waitTimeMs);
         return;
     }
 
-    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Reintentando en 5 minutos...`);
+    // --- Ni botón ni temporizador ---
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Cerrando sesión y reintentando en 5 minutos...");
+    if (browser) await browser.close();
     setTimeout(runCycle, 300000);
 
   } catch (err) {
@@ -488,23 +478,20 @@ async function runCycle() {
       try { await browser.close(); } catch (e) {}
     }
     console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
-    setTimeout(() => {
-      isFirstRun = true;
-      runCycle();
-    }, 60000);
+    setTimeout(runCycle, 60000);
   }
 }
 
+// Iniciar el primer ciclo
 runCycle();
 
+// Manejar señales de cierre
 process.on('SIGINT', async () => {
   console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de interrupción. Cerrando...`);
-  if (browser) await browser.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de terminación. Cerrando...`);
-  if (browser) await browser.close();
   process.exit(0);
 });
