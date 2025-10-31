@@ -1,4 +1,4 @@
-// bot.js - Versión v1.3
+// bot.js - Versión v1.3.1
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -102,7 +102,6 @@ async function sendNotification(message) {
     });
 }
 
-// Función para login con reintentos (ahora dentro de cada ciclo)
 async function performLogin(page) {
   for (let attempt = 1; attempt < 4; ++attempt) {
     try {
@@ -127,25 +126,62 @@ async function performLogin(page) {
   }
 }
 
-// Función para encontrar un selector probando diferentes valores de nth-child
-async function findElementByNthChild(page, baseSelector, nthValues, description) {
-  // Probamos todos los valores, no hay "último exitoso" porque es sesión nueva
-  for (const n of nthValues) {
-    const tentativeSelector = baseSelector.replace('NTH', n.toString());
-    console.log(`${getCurrentTimestamp()} 🔍 Probando ${description} con nth-child(${n})...`);
-    try {
-      await page.waitForSelector(tentativeSelector, { timeout: 5000 });
-      console.log(`${getCurrentTimestamp()} ✅ ${description} encontrado con nth-child(${n}).`);
-      return tentativeSelector;
-    } catch (e) {
-      continue;
+// Función robusta para encontrar contenedor de balance
+async function findBalanceContainer(page) {
+    const baseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div';
+    const possibleNths = [1, 2, 3, 4, 5];
+
+    for (const n of possibleNths) {
+        const selector = baseSelector.replace('NTH', n.toString());
+        try {
+            await page.waitForSelector(selector, { timeout: 5000 });
+            const container = await page.$(selector);
+            const text = await page.evaluate(el => el.textContent, container);
+            if (text && text.toLowerCase().includes('current balance')) {
+                console.log(`${getCurrentTimestamp()} ✅ Contenedor de balance válido encontrado con nth-child(${n}).`);
+                return selector;
+            } else {
+                console.log(`${getCurrentTimestamp()} ℹ️ Contenedor nth-child(${n}) existe pero no contiene 'Current balance'.`);
+            }
+        } catch (e) {
+            // continue
+        }
     }
-  }
-  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró el selector de ${description} con ninguno de los valores de nth-child probados.`);
-  return null;
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró contenedor de balance válido.`);
+    return null;
 }
 
-// Función para extraer el balance numérico de un contenedor ya encontrado
+// Función robusta para encontrar contenedor de botón
+async function findPotContainer(page) {
+    const baseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
+    const possibleNths = [1, 2, 3, 4, 5];
+
+    for (const n of possibleNths) {
+        const selector = baseSelector.replace('NTH', n.toString());
+        try {
+            await page.waitForSelector(selector, { timeout: 5000 });
+            const buttonSelector = `${selector} button`;
+            try {
+                await page.waitForSelector(buttonSelector, { timeout: 5000 });
+                const buttonText = await page.evaluate(el => el.textContent.trim(), await page.$(buttonSelector));
+                const lowerText = buttonText.toLowerCase();
+                if (lowerText.includes('claim') || lowerText.includes('open lucky pot')) {
+                    console.log(`${getCurrentTimestamp()} ✅ Contenedor de pot válido encontrado con nth-child(${n}).`);
+                    return selector;
+                } else {
+                    console.log(`${getCurrentTimestamp()} ℹ️ Contenedor nth-child(${n}) tiene botón, pero texto no válido: "${buttonText}".`);
+                }
+            } catch (e) {
+                console.log(`${getCurrentTimestamp()} ℹ️ Contenedor nth-child(${n}) existe pero no contiene botón válido.`);
+            }
+        } catch (e) {
+            // continue
+        }
+    }
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró contenedor de pot válido.`);
+    return null;
+}
+
 async function extractBalanceFromContainer(page, containerElement) {
     if (!containerElement) {
         console.log(`${getCurrentTimestamp()} ⚠️ Contenedor de balance no proporcionado para extracción.`);
@@ -179,19 +215,13 @@ async function extractBalanceFromContainer(page, containerElement) {
     return null;
 }
 
-// Buscar botón de acción
 async function findClaimButton(page) {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando botón de acción ('Claim' o 'Open Lucky Pot')...`);
 
-    const potBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
-    const possiblePotNths = [1, 2, 3, 4, 5];
-
-    for (const n of possiblePotNths) {
-        const potContainerSelector = potBaseSelector.replace('NTH', n.toString());
+    const potContainerSelector = await findPotContainer(page);
+    if (potContainerSelector) {
         try {
-            await page.waitForSelector(potContainerSelector, { timeout: 5000 });
             const buttonSelector = `${potContainerSelector} button`;
-            // Esperar hasta 25 segundos a que aparezca el botón
             await page.waitForSelector(buttonSelector, { timeout: 25000 });
             const claimButton = await page.$(buttonSelector);
             if (claimButton) {
@@ -209,9 +239,9 @@ async function findClaimButton(page) {
             }
         } catch (e) {
             if (e.name === 'TimeoutError') {
-                // Silently continue to next nth
+                console.log(`${getCurrentTimestamp()} ⏳ Timeout: No se encontró botón dentro del contenedor en 25 segundos.`);
             } else {
-                console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor nth-child(${n}): ${e.message}`);
+                console.log(`${getCurrentTimestamp()} ⚠️ Error al verificar botón en contenedor: ${e.message}`);
             }
         }
     }
@@ -220,7 +250,6 @@ async function findClaimButton(page) {
     return { found: false };
 }
 
-// Buscar temporizador
 async function findAndExtractCountdown(page) {
     console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
 
@@ -263,7 +292,6 @@ async function findAndExtractCountdown(page) {
         // Silently continue
     }
 
-    // Fallback por texto
     try {
         const validLabelsLower = ["time left to collect", "next pot available in"];
         const countdownInfo = await page.evaluate((labels) => {
@@ -318,7 +346,6 @@ async function findAndExtractCountdown(page) {
     return { found: false };
 }
 
-// Función principal del ciclo (ahora efímera)
 async function runCycle() {
   let browser = null;
   let page = null;
@@ -391,12 +418,9 @@ async function runCycle() {
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES...`);
     await page.waitForTimeout(5000);
 
-    const balanceBaseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div';
-    const possibleBalanceNths = [1, 2, 3, 4, 5];
-
     let balanceBefore = "0";
     let balanceBeforeFound = false;
-    const balanceContainerSelector = await findElementByNthChild(page, balanceBaseSelector, possibleBalanceNths, 'balance');
+    const balanceContainerSelector = await findBalanceContainer(page);
     if (balanceContainerSelector) {
         const balanceContainer = await page.$(balanceContainerSelector);
         const extractedBalance = await extractBalanceFromContainer(page, balanceContainer);
@@ -428,7 +452,7 @@ async function runCycle() {
 
         let balanceAfter = "0";
         let balanceAfterFound = false;
-        const newBalanceContainerSelector = await findElementByNthChild(page, balanceBaseSelector, possibleBalanceNths, 'balance');
+        const newBalanceContainerSelector = await findBalanceContainer(page);
         if (newBalanceContainerSelector) {
             const newBalanceContainer = await page.$(newBalanceContainerSelector);
             const extractedNewBalance = await extractBalanceFromContainer(page, newBalanceContainer);
