@@ -278,7 +278,7 @@ async function findAndExtractCountdown(page) {
                 const timeObj = parseCountdownText(timeText);
                 const totalSeconds = timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds;
                 if (totalSeconds > 0) {
-                    const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
+                    const waitTimeMs = timeToMilliseconds(timeObj) + 300000;
                     const { dateStr, timeStr } = getFutureTime(waitTimeMs);
                     const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
                     console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
@@ -329,7 +329,7 @@ async function findAndExtractCountdown(page) {
             const timeObj = parseCountdownText(countdownInfo.text);
             const totalSeconds = timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds;
             if (totalSeconds > 0) {
-                const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
+                const waitTimeMs = timeToMilliseconds(timeObj) + 300000;
                 const { dateStr, timeStr } = getFutureTime(waitTimeMs);
                 const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
                 console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
