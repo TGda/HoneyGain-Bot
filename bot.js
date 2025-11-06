@@ -500,7 +500,7 @@ async function runCycle() {
     }
 
     // --- Ni botón ni temporizador ---
-    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Cerrando sesión y reintentando en 5 minutos...");
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Cerrando sesión y reintentando en 5 minutos...`);
     if (browser) await browser.close();
     setTimeout(runCycle, 300000);
 
