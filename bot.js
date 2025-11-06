@@ -1,4 +1,4 @@
-// bot.js - Versión v1.3.1
+// bot.js - Versión v1.4
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -126,7 +126,6 @@ async function performLogin(page) {
   }
 }
 
-// Función robusta para encontrar contenedor de balance
 async function findBalanceContainer(page) {
     const baseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div';
     const possibleNths = [1, 2, 3, 4, 5];
@@ -151,7 +150,6 @@ async function findBalanceContainer(page) {
     return null;
 }
 
-// Función robusta para encontrar contenedor de botón
 async function findPotContainer(page) {
     const baseSelector = '#root > div.sc-cSzYSJ.hZVuLe > div.sc-gEtfcr.jNBTJR > div > main > div > div > div:nth-child(NTH) > div > div > div > div.sc-fAUdSK.fFFaNF > div > div';
     const possibleNths = [1, 2, 3, 4, 5];
@@ -278,7 +276,7 @@ async function findAndExtractCountdown(page) {
                 const timeObj = parseCountdownText(timeText);
                 const totalSeconds = timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds;
                 if (totalSeconds > 0) {
-                    const waitTimeMs = timeToMilliseconds(timeObj) + 300000;
+                    const waitTimeMs = timeToMilliseconds(timeObj) + 300000; // +5 minutos
                     const { dateStr, timeStr } = getFutureTime(waitTimeMs);
                     const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
                     console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
@@ -329,7 +327,7 @@ async function findAndExtractCountdown(page) {
             const timeObj = parseCountdownText(countdownInfo.text);
             const totalSeconds = timeObj.hours * 3600 + timeObj.minutes * 60 + timeObj.seconds;
             if (totalSeconds > 0) {
-                const waitTimeMs = timeToMilliseconds(timeObj) + 300000;
+                const waitTimeMs = timeToMilliseconds(timeObj) + 300000; // +5 minutos
                 const { dateStr, timeStr } = getFutureTime(waitTimeMs);
                 const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
                 console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
@@ -415,7 +413,7 @@ async function runCycle() {
     }
 
     // --- Obtener balance ANTES ---
-    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES...`);
+    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de cualquier acción...`);
     await page.waitForTimeout(5000);
 
     let balanceBefore = "0";
@@ -427,7 +425,7 @@ async function runCycle() {
         if (extractedBalance) {
             balanceBefore = extractedBalance;
             balanceBeforeFound = true;
-            console.log(`${getCurrentTimestamp()} ✅ Balance ANTES: ${balanceBefore}`);
+            console.log(`${getCurrentTimestamp()} 💰 Balance ANTES del intento: ${balanceBefore}`);
         }
     }
 
@@ -439,17 +437,18 @@ async function runCycle() {
     const claimButtonResult = await findClaimButton(page);
 
     if (claimButtonResult.found) {
-        console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón válido...`);
+        console.log(`${getCurrentTimestamp()} 👆 Botón encontrado. Procediendo a hacer clic...`);
         await page.click(`${claimButtonResult.selector} button`);
 
-        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de la acción...`);
-        await page.waitForTimeout(5000);
+        console.log(`${getCurrentTimestamp()} ⏳ Clic realizado. Esperando 30 segundos para que Honeygain procese el premio...`);
+        await page.waitForTimeout(30000); // ←←← CAMBIO CLAVE: 30 segundos
 
         // --- Obtener balance DESPUÉS ---
-        console.log(`${getCurrentTimestamp()} 🔄 Refrescando para obtener balance DESPUÉS...`);
+        console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS del clic...`);
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(10000); // Espera adicional tras reload
 
+        console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS del intento...`);
         let balanceAfter = "0";
         let balanceAfterFound = false;
         const newBalanceContainerSelector = await findBalanceContainer(page);
@@ -459,23 +458,31 @@ async function runCycle() {
             if (extractedNewBalance) {
                 balanceAfter = extractedNewBalance;
                 balanceAfterFound = true;
-                console.log(`${getCurrentTimestamp()} ✅ Balance DESPUÉS: ${balanceAfter}`);
+                console.log(`${getCurrentTimestamp()} 💰 Balance DESPUÉS del intento: ${balanceAfter}`);
             }
         }
 
         if (!balanceAfterFound) {
-            throw new Error("No se pudo encontrar el balance después.");
+            throw new Error("No se pudo encontrar el balance después del intento.");
         }
 
-        const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
+        const balanceBeforeNum = parseFloat(balanceBefore.replace(/,/g, ''));
+        const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
+        const balanceIncreased = balanceAfterNum > balanceBeforeNum;
+        const difference = balanceAfterNum - balanceBeforeNum;
+
+        console.log(`${getCurrentTimestamp()} 📊 Comparación de balances:`);
+        console.log(`${getCurrentTimestamp()}    Antes: ${balanceBeforeNum}`);
+        console.log(`${getCurrentTimestamp()}    Después: ${balanceAfterNum}`);
+        console.log(`${getCurrentTimestamp()}    Diferencia: ${difference.toFixed(2)}`);
+
         if (balanceIncreased) {
-            console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
+            console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: El balance aumentó. Premio reclamado.`);
             await sendNotification("Premio Honeygain reclamado con aumento de balance");
         } else {
-            console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar.`);
+            console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó. Posible falso positivo o premio ya reclamado.`);
         }
 
-        // Cerrar sesión y esperar 5 minutos antes del próximo ciclo
         console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando 5 minutos antes del próximo ciclo...`);
         if (browser) await browser.close();
         setTimeout(runCycle, 300000); // 5 minutos
@@ -483,6 +490,7 @@ async function runCycle() {
     }
 
     // --- No hay botón: buscar temporizador ---
+    console.log(`${getCurrentTimestamp()} ℹ️ Botón no encontrado. Buscando temporizador para programar próxima ejecución...`);
     const countdownResult = await findAndExtractCountdown(page);
     if (countdownResult.found) {
         console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando hasta el próximo pot...`);
@@ -492,7 +500,7 @@ async function runCycle() {
     }
 
     // --- Ni botón ni temporizador ---
-    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Cerrando sesión y reintentando en 5 minutos...`);
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Cerrando sesión y reintentando en 5 minutos...");
     if (browser) await browser.close();
     setTimeout(runCycle, 300000);
 
