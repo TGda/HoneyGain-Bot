@@ -1,4 +1,4 @@
-// bot.js - Versión v1.4
+// bot.js - Versión v1.5
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -279,7 +279,7 @@ async function findAndExtractCountdown(page) {
                     const waitTimeMs = timeToMilliseconds(timeObj) + 300000; // +5 minutos
                     const { dateStr, timeStr } = getFutureTime(waitTimeMs);
                     const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-                    console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
+                    console.log(`${getCurrentTimestamp()} ⏰ Próximo intento programado para el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
                     return { found: true, waitTimeMs };
                 } else {
                     console.log(`${getCurrentTimestamp()} ℹ️ Temporizador encontrado, pero el tiempo es 0.`);
@@ -330,7 +330,7 @@ async function findAndExtractCountdown(page) {
                 const waitTimeMs = timeToMilliseconds(timeObj) + 300000; // +5 minutos
                 const { dateStr, timeStr } = getFutureTime(waitTimeMs);
                 const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-                console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
+                console.log(`${getCurrentTimestamp()} ⏰ Próximo intento programado para el ${dateStr} a las ${timeStr} (~${minutes} min)...`);
                 return { found: true, waitTimeMs };
             } else {
                 console.log(`${getCurrentTimestamp()} ℹ️ Temporizador por texto encontrado, pero tiempo es 0.`);
@@ -344,12 +344,13 @@ async function findAndExtractCountdown(page) {
     return { found: false };
 }
 
-async function runCycle() {
+// Nueva función: ejecutar ciclo de intento de reclamo
+async function attemptClaimCycle() {
   let browser = null;
   let page = null;
 
   try {
-    console.log(`${getCurrentTimestamp()} 🚀 Iniciando nueva sesión de Honeygain...`);
+    console.log(`${getCurrentTimestamp()} 🚀 Iniciando intento de reclamo (sesión nueva)...`);
     browser = await puppeteer.launch({
       headless: 'old',
       args: [
@@ -373,25 +374,12 @@ async function runCycle() {
     });
 
     page = await browser.newPage();
-    console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
-    const response = await page.goto("https://dashboard.honeygain.com/login", {
-      waitUntil: "networkidle2",
-      timeout: 60000,
-    });
-    console.log(`${getCurrentTimestamp()}    Estado de carga: ${response.status()}`);
-
-    const content = await page.content();
-    if (content.includes("Your browser does not support JavaScript!")) {
-      console.log(`${getCurrentTimestamp()} ⚠️ La página indica que el navegador no soporta JavaScript.`);
-    }
+    await page.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
 
     try {
       await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 });
-      console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en botón inicial...`);
       await page.click(".sc-kLhKbu.cRDTkV");
-    } catch (e) {
-      console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón inicial, continuando...`);
-    }
+    } catch (e) {}
 
     await page.waitForSelector('#email', { timeout: 15000 });
     await page.waitForSelector('#password', { timeout: 15000 });
@@ -402,128 +390,204 @@ async function runCycle() {
       throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
     }
 
-    if (await performLogin(page)) {
-      console.log(`${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.`);
-      const currentUrl = page.url();
-      if (!currentUrl.includes("dashboard.honeygain.com/")) {
-        throw new Error("No se pudo acceder al dashboard después del login");
-      }
-    } else {
+    if (!(await performLogin(page))) {
       throw new Error("No se pudo realizar el login");
     }
 
-    // --- Obtener balance ANTES ---
-    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de cualquier acción...`);
+    // Obtener balance antes
     await page.waitForTimeout(5000);
-
-    let balanceBefore = "0";
-    let balanceBeforeFound = false;
     const balanceContainerSelector = await findBalanceContainer(page);
-    if (balanceContainerSelector) {
-        const balanceContainer = await page.$(balanceContainerSelector);
-        const extractedBalance = await extractBalanceFromContainer(page, balanceContainer);
-        if (extractedBalance) {
-            balanceBefore = extractedBalance;
-            balanceBeforeFound = true;
-            console.log(`${getCurrentTimestamp()} 💰 Balance ANTES del intento: ${balanceBefore}`);
-        }
-    }
-
-    if (!balanceBeforeFound) {
+    if (!balanceContainerSelector) {
       throw new Error("No se pudo encontrar el balance antes de reclamar.");
     }
+    const balanceContainer = await page.$(balanceContainerSelector);
+    const balanceBefore = await extractBalanceFromContainer(page, balanceContainer);
+    if (!balanceBefore) {
+      throw new Error("No se pudo extraer el balance antes de reclamar.");
+    }
+    console.log(`${getCurrentTimestamp()} 💰 Balance ANTES: ${balanceBefore}`);
 
-    // --- Buscar botón ---
+    // Buscar botón
     const claimButtonResult = await findClaimButton(page);
-
-    if (claimButtonResult.found) {
-        console.log(`${getCurrentTimestamp()} 👆 Botón encontrado. Procediendo a hacer clic...`);
-        await page.click(`${claimButtonResult.selector} button`);
-
-        console.log(`${getCurrentTimestamp()} ⏳ Clic realizado. Esperando 30 segundos para que Honeygain procese el premio...`);
-        await page.waitForTimeout(30000); // ←←← CAMBIO CLAVE: 30 segundos
-
-        // --- Obtener balance DESPUÉS ---
-        console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS del clic...`);
-        await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-        await page.waitForTimeout(10000); // Espera adicional tras reload
-
-        console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS del intento...`);
-        let balanceAfter = "0";
-        let balanceAfterFound = false;
-        const newBalanceContainerSelector = await findBalanceContainer(page);
-        if (newBalanceContainerSelector) {
-            const newBalanceContainer = await page.$(newBalanceContainerSelector);
-            const extractedNewBalance = await extractBalanceFromContainer(page, newBalanceContainer);
-            if (extractedNewBalance) {
-                balanceAfter = extractedNewBalance;
-                balanceAfterFound = true;
-                console.log(`${getCurrentTimestamp()} 💰 Balance DESPUÉS del intento: ${balanceAfter}`);
-            }
-        }
-
-        if (!balanceAfterFound) {
-            throw new Error("No se pudo encontrar el balance después del intento.");
-        }
-
-        const balanceBeforeNum = parseFloat(balanceBefore.replace(/,/g, ''));
-        const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
-        const balanceIncreased = balanceAfterNum > balanceBeforeNum;
-        const difference = balanceAfterNum - balanceBeforeNum;
-
-        console.log(`${getCurrentTimestamp()} 📊 Comparación de balances:`);
-        console.log(`${getCurrentTimestamp()}    Antes: ${balanceBeforeNum}`);
-        console.log(`${getCurrentTimestamp()}    Después: ${balanceAfterNum}`);
-        console.log(`${getCurrentTimestamp()}    Diferencia: ${difference.toFixed(2)}`);
-
-        if (balanceIncreased) {
-            console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: El balance aumentó. Premio reclamado.`);
-            await sendNotification("Premio Honeygain reclamado con aumento de balance");
-        } else {
-            console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó. Posible falso positivo o premio ya reclamado.`);
-        }
-
-        console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando 5 minutos antes del próximo ciclo...`);
-        if (browser) await browser.close();
-        setTimeout(runCycle, 300000); // 5 minutos
-        return;
+    if (!claimButtonResult.found) {
+      console.log(`${getCurrentTimestamp()} ℹ️ Botón no encontrado en este intento.`);
+      if (browser) await browser.close();
+      return { success: false, claimed: false };
     }
 
-    // --- No hay botón: buscar temporizador ---
-    console.log(`${getCurrentTimestamp()} ℹ️ Botón no encontrado. Buscando temporizador para programar próxima ejecución...`);
-    const countdownResult = await findAndExtractCountdown(page);
-    if (countdownResult.found) {
-        console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando hasta el próximo pot...`);
-        if (browser) await browser.close();
-        setTimeout(runCycle, countdownResult.waitTimeMs);
-        return;
+    // Hacer clic
+    console.log(`${getCurrentTimestamp()} 👆 Haciendo clic en el botón...`);
+    await page.click(`${claimButtonResult.selector} button`);
+    console.log(`${getCurrentTimestamp()} ⏳ Esperando 30 segundos para que Honeygain procese el premio...`);
+    await page.waitForTimeout(30000);
+
+    // Verificar balance después
+    await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+    await page.waitForTimeout(10000);
+    const newBalanceContainerSelector = await findBalanceContainer(page);
+    if (!newBalanceContainerSelector) {
+      throw new Error("No se pudo encontrar el balance después del intento.");
+    }
+    const newBalanceContainer = await page.$(newBalanceContainerSelector);
+    const balanceAfter = await extractBalanceFromContainer(page, newBalanceContainer);
+    if (!balanceAfter) {
+      throw new Error("No se pudo extraer el balance después del intento.");
     }
 
-    // --- Ni botón ni temporizador ---
-    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Cerrando sesión y reintentando en 5 minutos...`);
-    if (browser) await browser.close();
-    setTimeout(runCycle, 300000);
+    const balanceBeforeNum = parseFloat(balanceBefore.replace(/,/g, ''));
+    const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
+    const balanceIncreased = balanceAfterNum > balanceBeforeNum;
+
+    console.log(`${getCurrentTimestamp()} 💰 Balance DESPUÉS: ${balanceAfter}`);
+    console.log(`${getCurrentTimestamp()} 📊 Diferencia: ${(balanceAfterNum - balanceBeforeNum).toFixed(2)}`);
+
+    if (balanceIncreased) {
+      console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado.`);
+      await sendNotification("Premio Honeygain reclamado con aumento de balance");
+      if (browser) await browser.close();
+      return { success: true, claimed: true };
+    } else {
+      console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó.`);
+      if (browser) await browser.close();
+      return { success: true, claimed: false };
+    }
 
   } catch (err) {
-    console.error(`${getCurrentTimestamp()} ⚠️ Error en el ciclo:`, err.message);
+    console.error(`${getCurrentTimestamp()} ⚠️ Error en intento de reclamo:`, err.message);
     if (browser) {
       try { await browser.close(); } catch (e) {}
     }
-    console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
+    return { success: false, claimed: false };
+  }
+}
+
+// Nueva función: gestionar reintentos tras expiración
+async function handlePostExpiryRetries() {
+  const retryDelays = [
+    5 * 60 * 1000,   // 5 min
+    15 * 60 * 1000,  // 15 min
+    30 * 60 * 1000,  // 30 min
+    60 * 60 * 1000,  // 1h
+    120 * 60 * 1000  // 2h
+  ];
+
+  console.log(`${getCurrentTimestamp()} 🔄 Iniciando secuencia de reintentos tras expiración del temporizador...`);
+
+  for (let i = 0; i < retryDelays.length; i++) {
+    const delay = retryDelays[i];
+    const nextTime = new Date(Date.now() + delay);
+    const timeStr = nextTime.toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    console.log(`${getCurrentTimestamp()} ⏳ Reintento ${i + 1}/5 programado para las ${timeStr}...`);
+
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    const result = await attemptClaimCycle();
+    if (result.claimed) {
+      console.log(`${getCurrentTimestamp()} ✅ Premio reclamado en reintento ${i + 1}.`);
+      // Esperar 5 minutos y luego buscar nuevo temporizador
+      console.log(`${getCurrentTimestamp()} ⏰ Esperando 5 minutos antes de buscar nuevo temporizador...`);
+      await new Promise(resolve => setTimeout(resolve, 300000));
+      return true;
+    }
+    if (result.success && !result.claimed) {
+      console.log(`${getCurrentTimestamp()} ℹ️ Reintento ${i + 1} completado, pero sin premio. Continuando...`);
+    }
+  }
+
+  console.log(`${getCurrentTimestamp()} ❌ Todos los reintentos fallaron. Esperando próximo ciclo de 24h.`);
+  return false;
+}
+
+// Función principal
+async function runCycle() {
+  let browser = null;
+  let page = null;
+
+  try {
+    console.log(`${getCurrentTimestamp()} 🚀 Iniciando ciclo principal (búsqueda de temporizador)...`);
+    browser = await puppeteer.launch({
+      headless: 'old',
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-background-networking",
+        "--disable-translate",
+        "--disable-sync",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--metrics-recording-only",
+        "--mute-audio",
+        "--no-first-run",
+        "--no-zygote",
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+      ],
+    });
+
+    page = await browser.newPage();
+    await page.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
+
+    try {
+      await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 });
+      await page.click(".sc-kLhKbu.cRDTkV");
+    } catch (e) {}
+
+    await page.waitForSelector('#email', { timeout: 15000 });
+    await page.waitForSelector('#password', { timeout: 15000 });
+
+    const email = process.env.EMAIL;
+    const password = process.env.PASSWORD;
+    if (!email || !password) {
+      throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
+    }
+
+    if (!(await performLogin(page))) {
+      throw new Error("No se pudo realizar el login");
+    }
+
+    // Buscar temporizador
+    const countdownResult = await findAndExtractCountdown(page);
+    if (browser) await browser.close();
+
+    if (countdownResult.found) {
+      // Programar próxima ejecución
+      setTimeout(runCycle, countdownResult.waitTimeMs);
+    } else {
+      // No hay temporizador → asumir que es momento de reclamar
+      console.log(`${getCurrentTimestamp()} ℹ️ No se encontró temporizador. Iniciando secuencia de reintentos...`);
+      const claimed = await handlePostExpiryRetries();
+      if (!claimed) {
+        // Si todos los reintentos fallan, esperar 1 hora y volver a intentar el ciclo principal
+        console.log(`${getCurrentTimestamp()} ⏳ Esperando 1 hora antes de reintentar el ciclo principal...`);
+        setTimeout(runCycle, 60 * 60 * 1000);
+      } else {
+        // Ya manejado dentro de handlePostExpiryRetries
+        setTimeout(runCycle, 300000); // 5 minutos para buscar nuevo temporizador
+      }
+    }
+
+  } catch (err) {
+    console.error(`${getCurrentTimestamp()} ⚠️ Error en ciclo principal:`, err.message);
+    if (browser) {
+      try { await browser.close(); } catch (e) {}
+    }
+    console.log(`${getCurrentTimestamp()} 🔄 Reintentando en 60 segundos...`);
     setTimeout(runCycle, 60000);
   }
 }
 
-// Iniciar el primer ciclo
+// Iniciar
 runCycle();
 
-// Manejar señales de cierre
-process.on('SIGINT', async () => {
-  console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de interrupción. Cerrando...`);
+process.on('SIGINT', () => {
+  console.log(`${getCurrentTimestamp()} \n🛑 Cerrando...`);
   process.exit(0);
 });
 
-process.on('SIGTERM', async () => {
-  console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de terminación. Cerrando...`);
+process.on('SIGTERM', () => {
+  console.log(`${getCurrentTimestamp()} \n🛑 Cerrando...`);
   process.exit(0);
 });
