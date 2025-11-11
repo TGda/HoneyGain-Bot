@@ -1,4 +1,4 @@
-// bot.js - Versión v1.6
+// bot.js - Versión v1.6.1
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -358,7 +358,42 @@ async function getBalanceSafely(page) {
     return balance;
 }
 
-// Función para intentar reclamar en un ciclo aislado
+// Nueva función: buscar temporizador tras reclamo exitoso
+async function waitForNextPotAfterClaim() {
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando nuevo temporizador tras reclamo exitoso...`);
+    let browser = null;
+    let page = null;
+    try {
+        browser = await puppeteer.launch({
+            headless: 'old',
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+            ],
+        });
+        page = await browser.newPage();
+        await page.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
+        try { await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 }); await page.click(".sc-kLhKbu.cRDTkV"); } catch (e) {}
+        await page.waitForSelector('#email', { timeout: 15000 });
+        await page.waitForSelector('#password', { timeout: 15000 });
+        if (await performLogin(page)) {
+            const countdownResult = await findAndExtractCountdown(page);
+            if (countdownResult.found) {
+                if (browser) await browser.close();
+                return countdownResult.waitTimeMs;
+            }
+        }
+    } catch (err) {
+        console.error(`${getCurrentTimestamp()} ⚠️ Error al buscar temporizador tras reclamo:`, err.message);
+    } finally {
+        if (browser) { try { await browser.close(); } catch (e) {} }
+    }
+    // Si falla, esperar 1h como recuperación
+    return 60 * 60 * 1000;
+}
+
+// Función para intentar reclamar en un ciclo aislado (usado en reintentos)
 async function attemptClaimInIsolation(balanceAtStart) {
     let browser = null;
     let page = null;
@@ -481,13 +516,21 @@ async function runCycle() {
                 if (balanceIncreased) {
                     console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado en ciclo principal.`);
                     await sendNotification("Premio Honeygain reclamado con aumento de balance");
+                    
+                    // --- ✅ CORRECCIÓN: Ir directamente a buscar el temporizador ---
+                    if (browser) await browser.close();
+                    const waitTimeMs = await waitForNextPotAfterClaim();
+                    console.log(`${getCurrentTimestamp()} ⏰ Programando próxima ejecución tras encontrar nuevo temporizador...`);
+                    setTimeout(runCycle, waitTimeMs);
+                    return;
                 } else {
                     console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó.`);
                 }
             }
 
+            // Si no hubo aumento, cerrar y esperar 5 min (caso raro)
             if (browser) await browser.close();
-            console.log(`${getCurrentTimestamp()} ⏰ Esperando 5 minutos antes del próximo ciclo...`);
+            console.log(`${getCurrentTimestamp()} ⏰ Esperando 5 minutos antes del próximo ciclo (sin aumento de balance)...`);
             setTimeout(runCycle, 300000);
             return;
         }
@@ -514,8 +557,10 @@ async function runCycle() {
 
             const claimed = await attemptClaimInIsolation(balanceAtStart);
             if (claimed) {
-                console.log(`${getCurrentTimestamp()} ⏰ Éxito en reintento. Esperando 5 minutos antes del próximo ciclo...`);
-                setTimeout(runCycle, 300000);
+                // --- ✅ Tras éxito en reintento, ir a buscar temporizador ---
+                const waitTimeMs = await waitForNextPotAfterClaim();
+                console.log(`${getCurrentTimestamp()} ⏰ Programando próxima ejecución tras éxito en reintento...`);
+                setTimeout(runCycle, waitTimeMs);
                 return;
             }
         }
@@ -549,10 +594,8 @@ async function runCycle() {
         }
 
         if (countdownResult.found) {
-            // Esperar tiempo del temporizador + 5 min
             setTimeout(runCycle, countdownResult.waitTimeMs);
         } else {
-            // Modo recuperación: esperar 1h
             console.log(`${getCurrentTimestamp()} ⚠️ No se encontró temporizador tras reintentos. Esperando 1h para recuperación.`);
             setTimeout(runCycle, 60 * 60 * 1000);
         }
