@@ -1,4 +1,4 @@
-// bot.js - Versión v1.5.2
+// bot.js - Versión v1.6
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -344,7 +344,6 @@ async function findAndExtractCountdown(page) {
     return { found: false };
 }
 
-// Función para obtener balance de forma segura
 async function getBalanceSafely(page) {
     const balanceContainerSelector = await findBalanceContainer(page);
     if (!balanceContainerSelector) {
@@ -359,115 +358,143 @@ async function getBalanceSafely(page) {
     return balance;
 }
 
-// Función principal del ciclo
-async function runCycle() {
-  let browser = null;
-  let page = null;
-
-  try {
-    console.log(`${getCurrentTimestamp()} 🚀 Iniciando ciclo principal...`);
-    browser = await puppeteer.launch({
-      headless: 'old',
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-background-networking",
-        "--disable-translate",
-        "--disable-sync",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-breakpad",
-        "--disable-component-extensions-with-background-pages",
-        "--metrics-recording-only",
-        "--mute-audio",
-        "--no-first-run",
-        "--no-zygote",
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-      ],
-    });
-
-    page = await browser.newPage();
-    await page.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
-
+// Función para intentar reclamar en un ciclo aislado
+async function attemptClaimInIsolation(balanceAtStart) {
+    let browser = null;
+    let page = null;
     try {
-      await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 });
-      await page.click(".sc-kLhKbu.cRDTkV");
-    } catch (e) {}
+        browser = await puppeteer.launch({
+            headless: 'old',
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+            ],
+        });
+        page = await browser.newPage();
+        await page.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
+        try { await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 }); await page.click(".sc-kLhKbu.cRDTkV"); } catch (e) {}
+        await page.waitForSelector('#email', { timeout: 15000 });
+        await page.waitForSelector('#password', { timeout: 15000 });
+        if (!(await performLogin(page))) throw new Error("Login fallido");
 
-    await page.waitForSelector('#email', { timeout: 15000 });
-    await page.waitForSelector('#password', { timeout: 15000 });
+        const claimResult = await findClaimButton(page);
+        if (claimResult.found) {
+            console.log(`${getCurrentTimestamp()} 👆 Botón encontrado. Reclamando...`);
+            await page.click(`${claimResult.selector} button`);
+            await page.waitForTimeout(30000);
 
-    const email = process.env.EMAIL;
-    const password = process.env.PASSWORD;
-    if (!email || !password) {
-      throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
-    }
-
-    if (!(await performLogin(page))) {
-      throw new Error("No se pudo realizar el login");
-    }
-
-    // --- ✅ PRIMERO: OBTENER Y MOSTRAR BALANCE ACTUAL ---
-    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance actual al inicio del ciclo...`);
-    const balanceAtStart = await getBalanceSafely(page);
-    if (!balanceAtStart) {
-      throw new Error("No se pudo obtener el balance al inicio del ciclo.");
-    }
-
-    // --- 1. BUSCAR BOTÓN ---
-    const claimButtonResult = await findClaimButton(page);
-    if (claimButtonResult.found) {
-        console.log(`${getCurrentTimestamp()} 👆 Botón encontrado. Procediendo a reclamar...`);
-        await page.click(`${claimButtonResult.selector} button`);
-        console.log(`${getCurrentTimestamp()} ⏳ Esperando 30 segundos para que Honeygain procese el premio...`);
-        await page.waitForTimeout(30000);
-
-        // --- OBTENER BALANCE DESPUÉS ---
-        console.log(`${getCurrentTimestamp()} 🔄 Refrescando para obtener balance después del reclamo...`);
-        await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-        await page.waitForTimeout(10000);
-
-        const balanceAfter = await getBalanceSafely(page);
-        if (!balanceAfter) {
-            console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el balance después del reclamo.`);
-        } else {
-            const balanceBeforeNum = parseFloat(balanceAtStart.replace(/,/g, ''));
-            const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
-            const balanceIncreased = balanceAfterNum > balanceBeforeNum;
-            const difference = balanceAfterNum - balanceBeforeNum;
-
-            console.log(`${getCurrentTimestamp()} 📊 Comparación:`);
-            console.log(`${getCurrentTimestamp()}    Antes: ${balanceAtStart}`);
-            console.log(`${getCurrentTimestamp()}    Después: ${balanceAfter}`);
-            console.log(`${getCurrentTimestamp()}    Diferencia: ${difference.toFixed(2)}`);
-
-            if (balanceIncreased) {
-                console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: El balance aumentó. Premio reclamado.`);
-                await sendNotification("Premio Honeygain reclamado con aumento de balance");
-            } else {
-                console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó después de reclamar.`);
+            await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+            await page.waitForTimeout(10000);
+            const balanceAfter = await getBalanceSafely(page);
+            if (balanceAfter) {
+                const balanceBeforeNum = parseFloat(balanceAtStart.replace(/,/g, ''));
+                const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
+                const balanceIncreased = balanceAfterNum > balanceBeforeNum;
+                const diff = (balanceAfterNum - balanceBeforeNum).toFixed(2);
+                console.log(`${getCurrentTimestamp()} 📊 Comparación: Antes=${balanceAtStart}, Después=${balanceAfter}, Dif=${diff}`);
+                if (balanceIncreased) {
+                    console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado.`);
+                    await sendNotification("Premio Honeygain reclamado con aumento de balance");
+                    if (browser) await browser.close();
+                    return true;
+                }
             }
         }
-
-        console.log(`${getCurrentTimestamp()} 🔒 Cerrando sesión y esperando 5 minutos antes del próximo ciclo...`);
-        if (browser) await browser.close();
-        setTimeout(runCycle, 300000); // 5 minutos
-        return;
+    } catch (err) {
+        console.error(`${getCurrentTimestamp()} ⚠️ Error en intento aislado:`, err.message);
+    } finally {
+        if (browser) { try { await browser.close(); } catch (e) {} }
     }
+    return false;
+}
 
-    // --- 2. NO HAY BOTÓN: BUSCAR TEMPORIZADOR ---
-    console.log(`${getCurrentTimestamp()} ℹ️ Botón no encontrado. Buscando temporizador...`);
-    const countdownResult = await findAndExtractCountdown(page);
-    if (browser) await browser.close();
+// Función principal
+async function runCycle() {
+    let browser = null;
+    let page = null;
 
-    if (countdownResult.found) {
-        // Programar próxima ejecución normal
-        setTimeout(runCycle, countdownResult.waitTimeMs);
-    } else {
-        // --- 3. NO HAY NI BOTÓN NI TEMPORIZADOR: INICIAR REINTENTOS PROGRESIVOS ---
-        console.log(`${getCurrentTimestamp()} ⚠️ No se encontró botón ni temporizador. Iniciando secuencia de reintentos progresivos...`);
+    try {
+        console.log(`${getCurrentTimestamp()} 🚀 Iniciando ciclo principal...`);
+        browser = await puppeteer.launch({
+            headless: 'old',
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-background-networking",
+                "--disable-translate",
+                "--disable-sync",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-breakpad",
+                "--disable-component-extensions-with-background-pages",
+                "--metrics-recording-only",
+                "--mute-audio",
+                "--no-first-run",
+                "--no-zygote",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+            ],
+        });
+
+        page = await browser.newPage();
+        await page.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
+        try { await page.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 }); await page.click(".sc-kLhKbu.cRDTkV"); } catch (e) {}
+        await page.waitForSelector('#email', { timeout: 15000 });
+        await page.waitForSelector('#password', { timeout: 15000 });
+
+        const email = process.env.EMAIL;
+        const password = process.env.PASSWORD;
+        if (!email || !password) {
+            throw new Error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
+        }
+        if (!(await performLogin(page))) {
+            throw new Error("No se pudo realizar el login");
+        }
+
+        // --- 1. MOSTRAR BALANCE ACTUAL ---
+        console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance actual al inicio del ciclo...`);
+        const balanceAtStart = await getBalanceSafely(page);
+        if (!balanceAtStart) {
+            throw new Error("No se pudo obtener el balance al inicio.");
+        }
+
+        // --- 2. BUSCAR BOTÓN INMEDIATAMENTE ---
+        const claimButtonResult = await findClaimButton(page);
+        if (claimButtonResult.found) {
+            console.log(`${getCurrentTimestamp()} 👆 Botón encontrado en ciclo principal. Reclamando...`);
+            await page.click(`${claimButtonResult.selector} button`);
+            await page.waitForTimeout(30000);
+
+            await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+            await page.waitForTimeout(10000);
+            const balanceAfter = await getBalanceSafely(page);
+            if (balanceAfter) {
+                const balanceBeforeNum = parseFloat(balanceAtStart.replace(/,/g, ''));
+                const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
+                const balanceIncreased = balanceAfterNum > balanceBeforeNum;
+                const diff = (balanceAfterNum - balanceBeforeNum).toFixed(2);
+                console.log(`${getCurrentTimestamp()} 📊 Comparación: Antes=${balanceAtStart}, Después=${balanceAfter}, Dif=${diff}`);
+                if (balanceIncreased) {
+                    console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado en ciclo principal.`);
+                    await sendNotification("Premio Honeygain reclamado con aumento de balance");
+                } else {
+                    console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó.");
+                }
+            }
+
+            if (browser) await browser.close();
+            console.log(`${getCurrentTimestamp()} ⏰ Esperando 5 minutos antes del próximo ciclo...`);
+            setTimeout(runCycle, 300000);
+            return;
+        }
+
+        // --- 3. NO HAY BOTÓN: INICIAR REINTENTOS PROGRESIVOS ---
+        console.log(`${getCurrentTimestamp()} ⏳ Iniciando secuencia de reintentos progresivos (5m, 15m, 30m, 1h, 2h)...`);
+        if (browser) await browser.close();
 
         const retryDelays = [
             5 * 60 * 1000,   // 5 min
@@ -477,99 +504,76 @@ async function runCycle() {
             60 * 60 * 1000   // +60 min (total 2h)
         ];
 
-        let totalWait = 0;
         for (let i = 0; i < retryDelays.length; i++) {
-            totalWait += retryDelays[i];
-            const nextTime = new Date(Date.now() + retryDelays[i]);
+            const delay = retryDelays[i];
+            const nextTime = new Date(Date.now() + delay);
             const timeStr = nextTime.toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit' });
             console.log(`${getCurrentTimestamp()} ⏳ Reintento ${i + 1}/5 programado para las ${timeStr}...`);
 
-            await new Promise(resolve => setTimeout(resolve, retryDelays[i]));
+            await new Promise(resolve => setTimeout(resolve, delay));
 
-            // --- Intento de reclamo con balance inicial fijo ---
-            let retryBrowser = null;
-            let retryPage = null;
-            try {
-                retryBrowser = await puppeteer.launch({
-                  headless: 'old',
-                  args: [
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-                  ],
-                });
-                retryPage = await retryBrowser.newPage();
-                await retryPage.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
-
-                try { await retryPage.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 }); await retryPage.click(".sc-kLhKbu.cRDTkV"); } catch (e) {}
-                await retryPage.waitForSelector('#email', { timeout: 15000 });
-                await retryPage.waitForSelector('#password', { timeout: 15000 });
-                if (!(await performLogin(retryPage))) throw new Error("Login fallido en reintento");
-
-                const claimResult = await findClaimButton(retryPage);
-                if (claimResult.found) {
-                    console.log(`${getCurrentTimestamp()} 👆 Botón encontrado en reintento ${i + 1}. Reclamando...`);
-                    await retryPage.click(`${claimResult.selector} button`);
-                    await retryPage.waitForTimeout(30000);
-
-                    // Balance después
-                    await retryPage.reload({ waitUntil: "networkidle2", timeout: 30000 });
-                    await retryPage.waitForTimeout(10000);
-                    const balanceAfterRetry = await getBalanceSafely(retryPage);
-
-                    if (balanceAfterRetry) {
-                        const balanceBeforeNum = parseFloat(balanceAtStart.replace(/,/g, ''));
-                        const balanceAfterNum = parseFloat(balanceAfterRetry.replace(/,/g, ''));
-                        const balanceIncreased = balanceAfterNum > balanceBeforeNum;
-
-                        console.log(`${getCurrentTimestamp()} 📊 Comparación en reintento:`);
-                        console.log(`${getCurrentTimestamp()}    Antes (inicio de ciclo): ${balanceAtStart}`);
-                        console.log(`${getCurrentTimestamp()}    Después: ${balanceAfterRetry}`);
-                        console.log(`${getCurrentTimestamp()}    Diferencia: ${(balanceAfterNum - balanceBeforeNum).toFixed(2)}`);
-
-                        if (balanceIncreased) {
-                            console.log(`${getCurrentTimestamp()} ✅ ÉXITO en reintento ${i + 1}.`);
-                            await sendNotification("Premio Honeygain reclamado con aumento de balance");
-                            if (retryBrowser) await retryBrowser.close();
-                            console.log(`${getCurrentTimestamp()} ⏰ Esperando 5 minutos antes del próximo ciclo...`);
-                            setTimeout(runCycle, 300000);
-                            return;
-                        }
-                    }
-                }
-                if (retryBrowser) await retryBrowser.close();
-            } catch (err) {
-                console.error(`${getCurrentTimestamp()} ⚠️ Error en reintento ${i + 1}:`, err.message);
-                if (retryBrowser) { try { await retryBrowser.close(); } catch (e) {} }
+            const claimed = await attemptClaimInIsolation(balanceAtStart);
+            if (claimed) {
+                console.log(`${getCurrentTimestamp()} ⏰ Éxito en reintento. Esperando 5 minutos antes del próximo ciclo...`);
+                setTimeout(runCycle, 300000);
+                return;
             }
         }
 
-        // --- 4. TRAS 2H SIN ÉXITO: VOLVER AL CICLO NORMAL ---
-        console.log(`${getCurrentTimestamp()} ❌ Reintentos finalizados sin éxito. Volviendo al ciclo normal.`);
-        setTimeout(runCycle, 300000);
-    }
+        // --- 4. TRAS 2H SIN ÉXITO: BUSCAR TEMPORIZADOR ---
+        console.log(`${getCurrentTimestamp()} 🔍 Tras 2h de reintentos sin éxito. Buscando temporizador...`);
+        let finalBrowser = null;
+        let finalPage = null;
+        let countdownResult = { found: false };
+        try {
+            finalBrowser = await puppeteer.launch({
+                headless: 'old',
+                args: [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+                ],
+            });
+            finalPage = await finalBrowser.newPage();
+            await finalPage.goto("https://dashboard.honeygain.com/login", { waitUntil: "networkidle2", timeout: 60000 });
+            try { await finalPage.waitForSelector(".sc-kLhKbu.cRDTkV", { timeout: 10000 }); await finalPage.click(".sc-kLhKbu.cRDTkV"); } catch (e) {}
+            await finalPage.waitForSelector('#email', { timeout: 15000 });
+            await finalPage.waitForSelector('#password', { timeout: 15000 });
+            if (await performLogin(finalPage)) {
+                countdownResult = await findAndExtractCountdown(finalPage);
+            }
+        } catch (err) {
+            console.error(`${getCurrentTimestamp()} ⚠️ Error al buscar temporizador tras reintentos:`, err.message);
+        } finally {
+            if (finalBrowser) { try { await finalBrowser.close(); } catch (e) {} }
+        }
 
-  } catch (err) {
-    console.error(`${getCurrentTimestamp()} ⚠️ Error en ciclo principal:`, err.message);
-    if (browser) {
-      try { await browser.close(); } catch (e) {}
+        if (countdownResult.found) {
+            // Esperar tiempo del temporizador + 5 min
+            setTimeout(runCycle, countdownResult.waitTimeMs);
+        } else {
+            // Modo recuperación: esperar 1h
+            console.log(`${getCurrentTimestamp()} ⚠️ No se encontró temporizador tras reintentos. Esperando 1h para recuperación.`);
+            setTimeout(runCycle, 60 * 60 * 1000);
+        }
+
+    } catch (err) {
+        console.error(`${getCurrentTimestamp()} ⚠️ Error en ciclo principal:`, err.message);
+        if (browser) { try { await browser.close(); } catch (e) {} }
+        console.log(`${getCurrentTimestamp()} 🔄 Reintentando en 60 segundos...`);
+        setTimeout(runCycle, 60000);
     }
-    console.log(`${getCurrentTimestamp()} 🔄 Reintentando en 60 segundos...`);
-    setTimeout(runCycle, 60000);
-  }
 }
 
 // Iniciar
 runCycle();
 
 process.on('SIGINT', () => {
-  console.log(`${getCurrentTimestamp()} \n🛑 Cerrando...`);
-  process.exit(0);
+    console.log(`${getCurrentTimestamp()} \n🛑 Cerrando...`);
+    process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log(`${getCurrentTimestamp()} \n🛑 Cerrando...`);
-  process.exit(0);
+    console.log(`${getCurrentTimestamp()} \n🛑 Cerrando...`);
+    process.exit(0);
 });
