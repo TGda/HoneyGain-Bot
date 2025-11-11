@@ -482,7 +482,7 @@ async function runCycle() {
                     console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado en ciclo principal.`);
                     await sendNotification("Premio Honeygain reclamado con aumento de balance");
                 } else {
-                    console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó.");
+                    console.log(`${getCurrentTimestamp()} ⚠️ SIN CAMBIO: El balance no aumentó.');
                 }
             }
 
