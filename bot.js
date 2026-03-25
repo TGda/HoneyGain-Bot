@@ -66,7 +66,7 @@ async function sendNotification(message, balance) {
   return new Promise((resolve) => {
     const payload = {
       message,   // p.ej. "Premio Honeygain reclamado con aumento de balance"
-      balanceAfter    // p.ej. balanceAfter
+      balance    // p.ej. balanceAfter
     };
     const postData = JSON.stringify(payload);
 
