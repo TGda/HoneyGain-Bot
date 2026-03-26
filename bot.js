@@ -147,9 +147,7 @@ async function getBalanceSafely(page) {
   if (balance) console.log(`${getCurrentTimestamp()} 💰 Balance actual: ${balance}`);
   return balance;
 }
-PARTE 2 de 2 — Pega esto a continuación (el resto del archivo):
 
-js
 // ============================================================
 // NUEVA LÓGICA CENTRAL: detecta estado del pot en el modal
 // Retorna: { state: 'claimable' | 'cooldown' | 'unknown', waitTimeMs? }
