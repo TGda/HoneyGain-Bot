@@ -35,7 +35,7 @@ function timeToMilliseconds(timeObj) {
 function getFutureTime(milliseconds) {
   const now = new Date();
   const future = new Date(now.getTime() + milliseconds);
-  const dateStr = future.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+  const dateStr = future.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const timeStr = future.toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return { dateStr, timeStr };
 }
@@ -65,7 +65,10 @@ async function sendNotification(message, balance) {
       port: url.port || (isHttps ? 443 : 80),
       path: url.pathname + url.search,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
     };
     const req = httpModule.request(options, (res) => {
       console.log(`${getCurrentTimestamp()} ✅ Notificación enviada. Código: ${res.statusCode}`);
@@ -141,16 +144,17 @@ async function extractBalanceFromContainer(page, containerElement) {
 
 async function getBalanceSafely(page) {
   const sel = await findBalanceContainer(page);
-  if (!sel) { console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el balance.`); return null; }
+  if (!sel) {
+    console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el balance.`);
+    return null;
+  }
   const container = await page.$(sel);
   const balance = await extractBalanceFromContainer(page, container);
   if (balance) console.log(`${getCurrentTimestamp()} 💰 Balance actual: ${balance}`);
   return balance;
 }
-
 // ============================================================
 // DETECTAR ESTADO DEL POT — solo elementos VISIBLES
-// Retorna: { state: 'claimable' | 'cooldown' | 'unknown', waitTimeMs? }
 // ============================================================
 async function detectPotState(page) {
   console.log(`${getCurrentTimestamp()} 🔍 Detectando estado del Lucky Pot (solo elementos visibles)...`);
@@ -185,7 +189,7 @@ async function detectPotState(page) {
       }
     }
 
-    // 2. Buscar botón "Open Lucky Pot" o "Claim" VISIBLE
+    // 2. Buscar botón VISIBLE
     const buttons = document.querySelectorAll('button');
     for (const btn of buttons) {
       if (!isVisible(btn)) continue;
@@ -200,9 +204,9 @@ async function detectPotState(page) {
 
   if (result.state === 'cooldown') {
     const totalMs = (result.hours * 3600 + result.minutes * 60 + result.seconds) * 1000;
-    const waitTimeMs = totalMs + 300000; // +5 min margen
+    const waitTimeMs = totalMs + 300000;
     const { dateStr, timeStr } = getFutureTime(waitTimeMs);
-    console.log(`${getCurrentTimestamp()} ⏰ Countdown visible detectado: ${result.text}`);
+    console.log(`${getCurrentTimestamp()} ⏰ Countdown visible: ${result.text}`);
     console.log(`${getCurrentTimestamp()} ⏰ Próximo intento: ${dateStr} a las ${timeStr} (+5 min margen)`);
     return { state: 'cooldown', waitTimeMs };
   }
@@ -217,11 +221,11 @@ async function detectPotState(page) {
 }
 
 // ============================================================
-// LEER COUNTDOWN DEL DOM — solo elementos visibles
-// Usado tras claim exitoso para no necesitar segundo login
+// LEER COUNTDOWN DEL DOM tras claim exitoso
 // ============================================================
 async function readCountdownFromDOM(page) {
   console.log(`${getCurrentTimestamp()} 🔍 Leyendo countdown del DOM tras reclamo...`);
+
   const result = await page.evaluate(() => {
     function isVisible(el) {
       if (!el) return false;
@@ -254,16 +258,17 @@ async function readCountdownFromDOM(page) {
 
   if (result.found) {
     const totalMs = (result.hours * 3600 + result.minutes * 60 + result.seconds) * 1000;
-    const waitTimeMs = totalMs + 300000; // +5 min margen
+    const waitTimeMs = totalMs + 300000;
     const { dateStr, timeStr } = getFutureTime(waitTimeMs);
-    console.log(`${getCurrentTimestamp()} ⏰ Countdown leído del DOM: ${result.text}`);
+    console.log(`${getCurrentTimestamp()} ⏰ Countdown leído: ${result.text}`);
     console.log(`${getCurrentTimestamp()} ⏰ Próxima ejecución: ${dateStr} a las ${timeStr} (+5 min margen)`);
     return waitTimeMs;
   }
 
-  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró countdown visible tras el reclamo. Usando fallback 24h.`);
+  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró countdown visible tras reclamo. Usando fallback 24h.`);
   return 24 * 60 * 60 * 1000;
 }
+
 // ============================================================
 // CLAIM: click, espera confirmación, verifica balance
 // ============================================================
@@ -271,12 +276,17 @@ async function claimPot(page, balanceAtStart) {
   console.log(`${getCurrentTimestamp()} 👆 Reclamando Lucky Pot...`);
 
   const clicked = await page.evaluate(() => {
+    function isVisible(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      return true;
+    }
     const buttons = document.querySelectorAll('button');
     for (const btn of buttons) {
-      const style = window.getComputedStyle(btn);
-      const rect = btn.getBoundingClientRect();
-      const visible = style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-      if (!visible) continue;
+      if (!isVisible(btn)) continue;
       const text = btn.textContent?.trim().toLowerCase() || '';
       if (text.includes('open lucky pot') || text === 'claim') {
         btn.click();
@@ -288,17 +298,12 @@ async function claimPot(page, balanceAtStart) {
 
   if (!clicked) {
     console.log(`${getCurrentTimestamp()} ⚠️ No se pudo hacer click en el botón de claim.`);
-    return false;
+    return { success: false };
   }
 
-  // Esperar animación y modal de confirmación
   console.log(`${getCurrentTimestamp()} ⏳ Esperando confirmación del reclamo...`);
   await page.waitForTimeout(5000);
 
-  // Verificar si aparece "Congratulations" en el modal
-  const confirmed = await page.evaluate(() => {
-    const body = document.body.textContent?.toLowerCase() || '';
-    return
   // Verificar si aparece "Congratulations" en el modal
   const confirmed = await page.evaluate(() => {
     const body = document.body.textContent?.toLowerCase() || '';
@@ -306,7 +311,7 @@ async function claimPot(page, balanceAtStart) {
   });
 
   if (confirmed) {
-    console.log(`${getCurrentTimestamp()} 🎉 Confirmación de reclamo detectada en el modal.`);
+    console.log(`${getCurrentTimestamp()} 🎉 Confirmación detectada en el modal.`);
     await page.evaluate(() => {
       const buttons = document.querySelectorAll('button');
       for (const btn of buttons) {
@@ -318,10 +323,9 @@ async function claimPot(page, balanceAtStart) {
     });
     await page.waitForTimeout(3000);
   } else {
-    console.log(`${getCurrentTimestamp()} ⚠️ No se detectó confirmación en el modal. Continuando de todas formas...`);
+    console.log(`${getCurrentTimestamp()} ⚠️ No se detectó confirmación en el modal. Continuando...`);
   }
 
-  // Esperar a que el DOM actualice balance y countdown
   await page.waitForTimeout(3000);
 
   const balanceAfter = await getBalanceSafely(page);
@@ -333,7 +337,7 @@ async function claimPot(page, balanceAtStart) {
   const before = parseFloat(balanceAtStart.replace(/,/g, ''));
   const after = parseFloat(balanceAfter.replace(/,/g, ''));
   const diff = (after - before).toFixed(2);
-  console.log(`${getCurrentTimestamp()} 📊 Balance antes: ${balanceAtStart} | después: ${balanceAfter} | diferencia: +${diff}`);
+  console.log(`${getCurrentTimestamp()} 📊 Antes: ${balanceAtStart} | Después: ${balanceAfter} | Diferencia: +${diff}`);
 
   if (after > before) {
     console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado. +${diff} créditos.`);
@@ -344,7 +348,6 @@ async function claimPot(page, balanceAtStart) {
     return { success: false };
   }
 }
-
 // ============================================================
 // LOGIN + NAVEGACIÓN AL DASHBOARD
 // ============================================================
@@ -352,9 +355,15 @@ async function launchAndLogin() {
   const browser = await puppeteer.launch({
     headless: 'old',
     args: [
-      "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-      "--disable-background-networking", "--disable-translate", "--disable-sync",
-      "--no-first-run", "--mute-audio",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-background-networking",
+      "--disable-translate",
+      "--disable-sync",
+      "--no-first-run",
+      "--mute-audio",
       "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
     ]
   });
