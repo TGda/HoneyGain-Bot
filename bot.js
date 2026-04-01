@@ -1,4 +1,4 @@
-// bot.js - Versión v1.8.0
+// bot.js - Versión v1.9.0
 const puppeteer = require("puppeteer");
 const http = require("http");
 const https = require("https");
@@ -35,8 +35,12 @@ function timeToMilliseconds(timeObj) {
 function getFutureTime(milliseconds) {
   const now = new Date();
   const future = new Date(now.getTime() + milliseconds);
-  const dateStr = future.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = future.toLocaleTimeString('es-ES', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const dateStr = future.toLocaleDateString('es-ES', {
+    day: '2-digit', month: '2-digit', year: 'numeric'
+  });
+  const timeStr = future.toLocaleTimeString('es-ES', {
+    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
   return { dateStr, timeStr };
 }
 
@@ -154,25 +158,68 @@ async function getBalanceSafely(page) {
   return balance;
 }
 // ============================================================
-// DETECTAR ESTADO DEL POT — solo elementos VISIBLES
+// ABRIR MODAL DEL POT
 // ============================================================
-async function detectPotState(page) {
-  console.log(`${getCurrentTimestamp()} 🔍 Detectando estado del Lucky Pot (solo elementos visibles)...`);
+async function openPotModal(page) {
+  console.log(`${getCurrentTimestamp()} 🍯 Abriendo modal del Lucky Pot...`);
+  // El ícono del tarro está en la navbar superior
+  const potIconSelector = 'a[href*="lucky"], button[class*="lucky"], div[class*="lucky-pot"]';
+  try {
+    await page.waitForSelector(potIconSelector, { timeout: 5000 });
+    await page.click(potIconSelector);
+  } catch (e) {
+    // Fallback: buscar por posición conocida del ícono en el navbar
+    console.log(`${getCurrentTimestamp()} ℹ️ Selector del ícono no encontrado, usando click por evaluación...`);
+    await page.evaluate(() => {
+      const links = document.querySelectorAll('a, button');
+      for (const el of links) {
+        const href = el.getAttribute('href') || '';
+        const cls = el.className || '';
+        if (href.includes('lucky') || cls.includes('lucky') || cls.includes('pot')) {
+          el.click();
+          return;
+        }
+      }
+    });
+  }
+  // Esperar a que el modal aparezca
+  await page.waitForTimeout(2000);
+}
+
+// ============================================================
+// DETECTAR ESTADO DEL MODAL (abierto)
+// Retorna: { state: 'claimable' | 'cooldown' | 'unknown', waitTimeMs? }
+// ============================================================
+async function detectModalState(page) {
+  console.log(`${getCurrentTimestamp()} 🔍 Leyendo estado del modal del Lucky Pot...`);
+
+  // Intentar encontrar el botón "Open Lucky Pot" dentro del modal
+  const claimBtnSelector = 'button';
+  try {
+    await page.waitForSelector(claimBtnSelector, { timeout: 5000 });
+  } catch (e) { /* continuar */ }
 
   const result = await page.evaluate(() => {
-    function isVisible(el) {
-      if (!el) return false;
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return false;
-      return true;
+    // Buscar botón "Open Lucky Pot" o "Claim" visible
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      const rect = btn.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const style = window.getComputedStyle(btn);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const text = btn.textContent?.trim().toLowerCase() || '';
+      if (text.includes('open lucky pot') || text === 'claim') {
+        return { state: 'claimable', buttonText: btn.textContent?.trim() };
+      }
     }
 
-    // 1. Buscar countdown VISIBLE
+    // Buscar countdown dentro del modal
     const allElements = document.querySelectorAll('*');
     for (const el of allElements) {
-      if (!isVisible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
       const text = el.textContent || '';
       const lower = text.toLowerCase();
       if (lower.includes('next pot available in') || lower.includes('time left to collect')) {
@@ -189,145 +236,102 @@ async function detectPotState(page) {
       }
     }
 
-    // 2. Buscar botón VISIBLE
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-      if (!isVisible(btn)) continue;
-      const text = btn.textContent?.trim().toLowerCase() || '';
-      if (text.includes('open lucky pot') || text === 'claim') {
-        return { state: 'claimable', buttonText: btn.textContent?.trim() };
-      }
-    }
-
     return { state: 'unknown' };
   });
 
+  if (result.state === 'claimable') {
+    console.log(`${getCurrentTimestamp()} ✅ Modal muestra pot disponible. Botón: "${result.buttonText}"`);
+    return { state: 'claimable' };
+  }
+
   if (result.state === 'cooldown') {
     const totalMs = (result.hours * 3600 + result.minutes * 60 + result.seconds) * 1000;
-    const waitTimeMs = totalMs + 300000;
+    const waitTimeMs = totalMs + 300000; // +5 min margen
     const { dateStr, timeStr } = getFutureTime(waitTimeMs);
-    console.log(`${getCurrentTimestamp()} ⏰ Countdown visible: ${result.text}`);
+    console.log(`${getCurrentTimestamp()} ⏰ Modal muestra countdown: ${result.text}`);
     console.log(`${getCurrentTimestamp()} ⏰ Próximo intento: ${dateStr} a las ${timeStr} (+5 min margen)`);
     return { state: 'cooldown', waitTimeMs };
   }
 
-  if (result.state === 'claimable') {
-    console.log(`${getCurrentTimestamp()} ✅ Pot disponible. Botón visible: "${result.buttonText}"`);
-    return { state: 'claimable' };
-  }
-
-  console.log(`${getCurrentTimestamp()} ⚠️ Estado desconocido (ni botón ni countdown visibles).`);
+  console.log(`${getCurrentTimestamp()} ⚠️ Estado del modal desconocido.`);
   return { state: 'unknown' };
 }
 
 // ============================================================
-// LEER COUNTDOWN DEL DOM tras claim exitoso
-// ============================================================
-async function readCountdownFromDOM(page) {
-  console.log(`${getCurrentTimestamp()} 🔍 Leyendo countdown del DOM tras reclamo...`);
-
-  const result = await page.evaluate(() => {
-    function isVisible(el) {
-      if (!el) return false;
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return false;
-      return true;
-    }
-    const allElements = document.querySelectorAll('*');
-    for (const el of allElements) {
-      if (!isVisible(el)) continue;
-      const text = el.textContent || '';
-      const lower = text.toLowerCase();
-      if (lower.includes('next pot available in') || lower.includes('time left to collect')) {
-        const timeMatch = text.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
-        if (timeMatch) {
-          return {
-            found: true,
-            hours: parseInt(timeMatch[1], 10),
-            minutes: parseInt(timeMatch[2], 10),
-            seconds: parseInt(timeMatch[3], 10),
-            text: timeMatch[0]
-          };
-        }
-      }
-    }
-    return { found: false };
-  });
-
-  if (result.found) {
-    const totalMs = (result.hours * 3600 + result.minutes * 60 + result.seconds) * 1000;
-    const waitTimeMs = totalMs + 300000;
-    const { dateStr, timeStr } = getFutureTime(waitTimeMs);
-    console.log(`${getCurrentTimestamp()} ⏰ Countdown leído: ${result.text}`);
-    console.log(`${getCurrentTimestamp()} ⏰ Próxima ejecución: ${dateStr} a las ${timeStr} (+5 min margen)`);
-    return waitTimeMs;
-  }
-
-  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró countdown visible tras reclamo. Usando fallback 24h.`);
-  return 24 * 60 * 60 * 1000;
-}
-
-// ============================================================
-// CLAIM: click, espera confirmación, verifica balance
+// CLAIM: click real con page.click(), espera animación y OK
 // ============================================================
 async function claimPot(page, balanceAtStart) {
-  console.log(`${getCurrentTimestamp()} 👆 Reclamando Lucky Pot...`);
+  console.log(`${getCurrentTimestamp()} 👆 Haciendo click en "Open Lucky Pot"...`);
 
-  const clicked = await page.evaluate(() => {
-    function isVisible(el) {
-      if (!el) return false;
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return false;
-      return true;
-    }
+  // Encontrar el selector del botón y hacer click real
+  const claimButtonSelector = await page.evaluate(() => {
     const buttons = document.querySelectorAll('button');
     for (const btn of buttons) {
-      if (!isVisible(btn)) continue;
+      const rect = btn.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const style = window.getComputedStyle(btn);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
       const text = btn.textContent?.trim().toLowerCase() || '';
       if (text.includes('open lucky pot') || text === 'claim') {
-        btn.click();
+        // Añadir un atributo temporal para identificarlo
+        btn.setAttribute('data-honeygain-claim', 'true');
         return true;
       }
     }
     return false;
   });
 
-  if (!clicked) {
-    console.log(`${getCurrentTimestamp()} ⚠️ No se pudo hacer click en el botón de claim.`);
+  if (!claimButtonSelector) {
+    console.log(`${getCurrentTimestamp()} ⚠️ No se encontró el botón de claim.`);
     return { success: false };
   }
 
-  console.log(`${getCurrentTimestamp()} ⏳ Esperando confirmación del reclamo...`);
-  await page.waitForTimeout(5000);
+  // Click real con page.click() usando el atributo temporal
+  await page.click('button[data-honeygain-claim="true"]');
+  console.log(`${getCurrentTimestamp()} ⏳ Esperando animación (~7 segundos)...`);
+  await page.waitForTimeout(7000);
 
-  // Verificar si aparece "Congratulations" en el modal
-  const confirmed = await page.evaluate(() => {
-    const body = document.body.textContent?.toLowerCase() || '';
-    return body.includes('congratulations') || body.includes('credits added');
+  // Verificar "Congratulations" en el modal
+  const congratsVisible = await page.evaluate(() => {
+    const allElements = document.querySelectorAll('*');
+    for (const el of allElements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const text = el.textContent?.toLowerCase() || '';
+      if (text.includes('congratulations') || text.includes('credits added')) return true;
+    }
+    return false;
   });
 
-  if (confirmed) {
-    console.log(`${getCurrentTimestamp()} 🎉 Confirmación detectada en el modal.`);
-    await page.evaluate(() => {
+  if (congratsVisible) {
+    console.log(`${getCurrentTimestamp()} 🎉 "Congratulations" detectado en el modal.`);
+    // Click real en OK
+    const okClicked = await page.evaluate(() => {
       const buttons = document.querySelectorAll('button');
       for (const btn of buttons) {
-        if (btn.textContent?.trim().toLowerCase() === 'ok') {
-          btn.click();
-          return;
+        const rect = btn.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const text = btn.textContent?.trim().toLowerCase() || '';
+        if (text === 'ok') {
+          btn.setAttribute('data-honeygain-ok', 'true');
+          return true;
         }
       }
+      return false;
     });
-    await page.waitForTimeout(3000);
+    if (okClicked) {
+      await page.click('button[data-honeygain-ok="true"]');
+      console.log(`${getCurrentTimestamp()} ✅ Click en OK.`);
+      await page.waitForTimeout(3000);
+    }
   } else {
-    console.log(`${getCurrentTimestamp()} ⚠️ No se detectó confirmación en el modal. Continuando...`);
+    console.log(`${getCurrentTimestamp()} ⚠️ "Congratulations" no detectado. Continuando de todas formas...`);
+    await page.waitForTimeout(3000);
   }
 
-  await page.waitForTimeout(3000);
-
+  // Leer balance actualizado
   const balanceAfter = await getBalanceSafely(page);
   if (!balanceAfter) {
     console.log(`${getCurrentTimestamp()} ⚠️ No se pudo leer el balance después del reclamo.`);
@@ -342,11 +346,25 @@ async function claimPot(page, balanceAtStart) {
   if (after > before) {
     console.log(`${getCurrentTimestamp()} 🎉 ÉXITO: Premio reclamado. +${diff} créditos.`);
     await sendNotification(`Premio Honeygain reclamado. +${diff} créditos.`, balanceAfter);
-    return { success: true, balanceAfter };
+    return { success: true };
   } else {
-    console.log(`${getCurrentTimestamp()} ⚠️ El balance no aumentó tras el reclamo.`);
+    console.log(`${getCurrentTimestamp()} ⚠️ El balance no aumentó.`);
     return { success: false };
   }
+}
+
+// ============================================================
+// LEER COUNTDOWN ABRIENDO EL MODAL
+// ============================================================
+async function readCountdownFromModal(page) {
+  console.log(`${getCurrentTimestamp()} 🔍 Leyendo countdown desde el modal...`);
+  await openPotModal(page);
+  const state = await detectModalState(page);
+  // Cerrar modal con Escape
+  try { await page.keyboard.press('Escape'); } catch (e) {}
+  if (state.state === 'cooldown') return state.waitTimeMs;
+  console.log(`${getCurrentTimestamp()} ⚠️ No se encontró countdown en el modal. Usando fallback 24h.`);
+  return 24 * 60 * 60 * 1000;
 }
 // ============================================================
 // LOGIN + NAVEGACIÓN AL DASHBOARD
@@ -400,24 +418,26 @@ async function runCycle() {
     const balanceAtStart = await getBalanceSafely(page);
     if (!balanceAtStart) throw new Error("No se pudo obtener el balance inicial.");
 
-    // 2. DETECTAR ESTADO (solo elementos visibles)
-    const potState = await detectPotState(page);
+    // 2. ABRIR MODAL Y DETECTAR ESTADO
+    await openPotModal(page);
+    const modalState = await detectModalState(page);
 
-    // 3. COOLDOWN → cerrar y programar
-    if (potState.state === 'cooldown') {
+    // 3. COOLDOWN → cerrar modal, cerrar sesión y programar
+    if (modalState.state === 'cooldown') {
       console.log(`${getCurrentTimestamp()} 🕒 Pot en cooldown. Cerrando sesión.`);
+      try { await page.keyboard.press('Escape'); } catch (e) {}
       await browser.close();
-      setTimeout(runCycle, potState.waitTimeMs);
+      setTimeout(runCycle, modalState.waitTimeMs);
       return;
     }
 
     // 4. DISPONIBLE → reclamar
-    if (potState.state === 'claimable') {
+    if (modalState.state === 'claimable') {
       const claimResult = await claimPot(page, balanceAtStart);
 
       if (claimResult.success) {
-        // Leer countdown del mismo DOM, sin segundo login
-        const waitTimeMs = await readCountdownFromDOM(page);
+        // Leer countdown abriendo el modal de nuevo
+        const waitTimeMs = await readCountdownFromModal(page);
         await browser.close();
         const { dateStr, timeStr } = getFutureTime(waitTimeMs);
         console.log(`${getCurrentTimestamp()} ⏰ Próxima ejecución: ${dateStr} a las ${timeStr}`);
@@ -434,6 +454,7 @@ async function runCycle() {
 
     // 5. ESTADO DESCONOCIDO → esperar 1h
     console.log(`${getCurrentTimestamp()} ⚠️ Estado desconocido. Esperando 1 hora.`);
+    try { await page.keyboard.press('Escape'); } catch (e) {}
     await browser.close();
     setTimeout(runCycle, 60 * 60 * 1000);
 
